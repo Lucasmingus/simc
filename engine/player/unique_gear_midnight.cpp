@@ -3411,7 +3411,7 @@ void venomfang( special_effect_t& effect )
     action_t* burst;
 
     venomfang_dot_t( const special_effect_t& e )
-      : generic_proc_t( "venomfang", e, e.player->find_spell( 1306635 ) )
+      : generic_proc_t( e, "venomfang", e.player->find_spell( 1306635 ) )
     {
       base_td = e.driver()->effectN( 1 ).average( e );
       base_td_multiplier *= role_mult( e );
