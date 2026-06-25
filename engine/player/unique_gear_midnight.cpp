@@ -3387,6 +3387,49 @@ void murder_row_fishhook( special_effect_t& effect )
 
   new dbc_proc_callback_t( effect.player, effect );
 }
+
+// Venomfang
+// 1291718 driver (RPPM 5, Haste multiplier)
+// Used by: Aman'muso, Warlord's Vengeance (268209) and Maze-Roa, Warlord's Fury (268213)
+// 1306635 Venomfang DoT (Nature, 6s, ticks every 1s, bursts on expiry)
+// 1306639 Venomfang Burst (AoE Nature, 8yd, fires on DoT expiry)
+// Multiple applications can overlap (approximated as refreshing DoT)
+void venomfang( special_effect_t& effect )
+{
+  struct venomfang_burst_t : public generic_aoe_proc_t
+  {
+    venomfang_burst_t( const special_effect_t& e )
+      : generic_aoe_proc_t( e, "venomfang_burst", 1306639 )
+    {
+      base_dd_min = base_dd_max = e.driver()->effectN( 2 ).average( e );
+      base_multiplier *= role_mult( e );
+    }
+  };
+
+  struct venomfang_dot_t : public generic_proc_t
+  {
+    action_t* burst;
+
+    venomfang_dot_t( const special_effect_t& e )
+      : generic_proc_t( "venomfang", e, e.player->find_spell( 1306635 ) )
+    {
+      base_td = e.driver()->effectN( 1 ).average( e );
+      base_td_multiplier *= role_mult( e );
+
+      burst = create_proc_action<venomfang_burst_t>( "venomfang_burst", e );
+      add_child( burst );
+    }
+
+    void last_tick( dot_t* d ) override
+    {
+      generic_proc_t::last_tick( d );
+      burst->execute_on_target( d->target );
+    }
+  };
+
+  effect.execute_action = create_proc_action<venomfang_dot_t>( "venomfang", effect );
+  new dbc_proc_callback_t( effect.player, effect );
+}
 }  // namespace weapons
 
 namespace armors
@@ -4325,6 +4368,7 @@ void register_special_effects()
   register_special_effect( { 1253357, 1253359 }, weapons::torments_duality );  // umbral sabre & radiant foil
   register_special_effect( 1266257, weapons::lightless_lament );
   register_special_effect( 1250529, weapons::murder_row_fishhook );
+  register_special_effect( 1291718, weapons::venomfang );  // Aman'muso, Warlord's Vengeance & Maze-Roa, Warlord's Fury
   // Armor
   register_special_effect( 1271211, armors::eternal_voidsong_chain );
   register_special_effect( 1243883, armors::necrotic_hexweave );
