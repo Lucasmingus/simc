@@ -3400,7 +3400,7 @@ void zathatek_breath_of_corruption( special_effect_t& effect )
     double stack_mod;
 
     breath_of_corruption_t( const special_effect_t& e )
-      : generic_proc_t( "breath_of_corruption", e, e.player->find_spell( 1305395 ) ),
+      : generic_proc_t( e, "breath_of_corruption", e.player->find_spell( 1305395 ) ),
         stack_mod( e.driver()->effectN( 2 ).base_value() / 100.0 )
     {
       base_dd_min = base_dd_max = e.driver()->effectN( 1 ).average( e );
