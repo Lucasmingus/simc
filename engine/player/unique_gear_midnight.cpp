@@ -3387,6 +3387,46 @@ void murder_row_fishhook( special_effect_t& effect )
 
   new dbc_proc_callback_t( effect.player, effect );
 }
+
+// Zatha'tek, Breath of Corruption
+// 1298023 driver (RPPM 2.5, Haste multiplier)
+// 1305391 Necrotic Tear (stacking target debuff, persists until death, +5% dmg per stack, max 10)
+// 1305395 Breath of Corruption (direct Nature damage, increased by Necrotic Tear stacks)
+void zathatek_breath_of_corruption( special_effect_t& effect )
+{
+  struct breath_of_corruption_t : public generic_proc_t
+  {
+    buff_t* necrotic_tear;
+    double stack_mod;
+
+    breath_of_corruption_t( const special_effect_t& e )
+      : generic_proc_t( "breath_of_corruption", e, e.player->find_spell( 1305395 ) ),
+        stack_mod( e.driver()->effectN( 2 ).base_value() / 100.0 )
+    {
+      base_dd_min = base_dd_max = e.driver()->effectN( 1 ).average( e );
+      base_multiplier *= role_mult( e );
+
+      necrotic_tear = make_buff( e.player, "necrotic_tear", e.player->find_spell( 1305391 ) );
+    }
+
+    double composite_da_multiplier( const action_state_t* s ) const override
+    {
+      double m = generic_proc_t::composite_da_multiplier( s );
+      if ( necrotic_tear->check() )
+        m *= 1.0 + necrotic_tear->check() * stack_mod;
+      return m;
+    }
+
+    void impact( action_state_t* s ) override
+    {
+      generic_proc_t::impact( s );
+      necrotic_tear->trigger();
+    }
+  };
+
+  effect.execute_action = create_proc_action<breath_of_corruption_t>( "breath_of_corruption", effect );
+  new dbc_proc_callback_t( effect.player, effect );
+}
 }  // namespace weapons
 
 namespace armors
@@ -4325,6 +4365,7 @@ void register_special_effects()
   register_special_effect( { 1253357, 1253359 }, weapons::torments_duality );  // umbral sabre & radiant foil
   register_special_effect( 1266257, weapons::lightless_lament );
   register_special_effect( 1250529, weapons::murder_row_fishhook );
+  register_special_effect( 1298023, weapons::zathatek_breath_of_corruption );
   // Armor
   register_special_effect( 1271211, armors::eternal_voidsong_chain );
   register_special_effect( 1243883, armors::necrotic_hexweave );
