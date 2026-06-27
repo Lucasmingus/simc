@@ -3396,27 +3396,19 @@ void murder_row_fishhook( special_effect_t& effect )
 // Multiple applications can overlap (approximated as refreshing DoT)
 void venomfang( special_effect_t& effect )
 {
-  struct venomfang_burst_t : public generic_aoe_proc_t
-  {
-    venomfang_burst_t( const special_effect_t& e )
-      : generic_aoe_proc_t( e, "venomfang_burst", 1306639 )
-    {
-      base_dd_min = base_dd_max = e.driver()->effectN( 2 ).average( e );
-      base_multiplier *= role_mult( e );
-    }
-  };
+  auto burst = create_proc_action<generic_aoe_proc_t>( "venomfang_burst", effect, 1306639 );
+  burst->base_dd_min = burst->base_dd_max = effect.driver()->effectN( 2 ).average( effect );
+  burst->base_multiplier *= role_mult( effect );
 
   struct venomfang_dot_t : public generic_proc_t
   {
     action_t* burst;
 
-    venomfang_dot_t( const special_effect_t& e )
-      : generic_proc_t( e, "venomfang", e.player->find_spell( 1306635 ) )
+    venomfang_dot_t( const special_effect_t& e, action_t* b )
+      : generic_proc_t( e, "venomfang", e.player->find_spell( 1306635 ) ), burst( b )
     {
       base_td = e.driver()->effectN( 1 ).average( e );
       base_td_multiplier *= role_mult( e );
-
-      burst = create_proc_action<venomfang_burst_t>( "venomfang_burst", e );
       add_child( burst );
     }
 
@@ -3427,7 +3419,7 @@ void venomfang( special_effect_t& effect )
     }
   };
 
-  effect.execute_action = create_proc_action<venomfang_dot_t>( "venomfang", effect );
+  effect.execute_action = create_proc_action<venomfang_dot_t>( "venomfang", effect, burst );
   new dbc_proc_callback_t( effect.player, effect );
 }
 }  // namespace weapons
