@@ -3417,9 +3417,8 @@ void venomfang( special_effect_t& effect )
 
     buff_t* create_debuff( player_t* t ) override
     {
+      // SX_ASYNCRONOUS_STACKING_BUFF (attr 490) on spell 1306635 auto-sets ASYNCHRONOUS stack behavior
       return make_buff<buff_t>( actor_pair_t( t, player ), "venomfang", &data() )
-        ->set_stack_behavior( buff_stack_behavior::ASYNCHRONOUS )
-        ->set_activated( true )
         ->set_expire_callback( [ this ]( buff_t* b, int, timespan_t ) {
             burst->execute_on_target( b->player );
           } );
