@@ -3393,7 +3393,8 @@ void murder_row_fishhook( special_effect_t& effect )
 // Used by: Aman'muso, Warlord's Vengeance (268209) and Maze-Roa, Warlord's Fury (268213)
 // 1306635 Venomfang DoT (Nature, 6s, ticks every 1s, bursts on expiry)
 // 1306639 Venomfang Burst (AoE Nature, 8yd, fires on DoT expiry)
-// Multiple applications can overlap (approximated as refreshing DoT)
+// Multiple applications overlap: single refreshing DoT, ASYNCHRONOUS debuff tracks independent instances,
+// tick damage scales with active instance count, each instance expiry fires the burst
 void venomfang( special_effect_t& effect )
 {
   auto burst = create_proc_action<generic_aoe_proc_t>( "venomfang_burst", effect, 1306639 );
@@ -3407,15 +3408,36 @@ void venomfang( special_effect_t& effect )
     venomfang_dot_t( const special_effect_t& e, action_t* b )
       : generic_proc_t( e, "venomfang", e.player->find_spell( 1306635 ) ), burst( b )
     {
-      base_td = e.driver()->effectN( 1 ).average( e );
+      dot_max_stack = 1;
+      dot_behavior  = dot_behavior_e::DOT_REFRESH_DURATION;
+      base_td       = e.driver()->effectN( 1 ).average( e );
       base_td_multiplier *= role_mult( e );
       add_child( burst );
     }
 
-    void last_tick( dot_t* d ) override
+    buff_t* create_debuff( player_t* t ) override
     {
-      generic_proc_t::last_tick( d );
-      burst->execute_on_target( d->target );
+      return make_buff<buff_t>( actor_pair_t( t, player ), "venomfang", &data() )
+        ->set_stack_behavior( buff_stack_behavior::ASYNCHRONOUS )
+        ->set_activated( true )
+        ->set_expire_callback( [ this ]( buff_t* b, int, timespan_t ) {
+            burst->execute_on_target( b->player );
+          } );
+    }
+
+    double composite_ta_multiplier( const action_state_t* s ) const override
+    {
+      double m = generic_proc_t::composite_ta_multiplier( s );
+      if ( auto debuff = find_debuff( s->target ) )
+        m *= debuff->check();
+      return m;
+    }
+
+    void trigger_dot( action_state_t* s ) override
+    {
+      generic_proc_t::trigger_dot( s );
+      auto duration = calculate_dot_refresh_duration( get_dot( s->target ), dot_duration );
+      get_debuff( s->target )->trigger( duration + 1_ms );
     }
   };
 
