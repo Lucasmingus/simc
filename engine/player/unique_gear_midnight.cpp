@@ -3287,6 +3287,7 @@ void zuljins_guillotine_technique( special_effect_t& effect )
   struct guillotine_t : public generic_proc_t
   {
     double missing_hp_mult;
+    bool has_2pc = false;
     action_t* ricochet = nullptr;
     action_t* venomfang = nullptr;
 
@@ -3309,7 +3310,7 @@ void zuljins_guillotine_technique( special_effect_t& effect )
     void init_finished() override
     {
       generic_proc_t::init_finished();
-      if ( ricochet )
+      if ( has_2pc )
         venomfang = player->find_action( "venomfang" );
     }
 
@@ -3320,17 +3321,16 @@ void zuljins_guillotine_technique( special_effect_t& effect )
       if ( !ricochet )
         return;
 
-      if ( venomfang )
-        venomfang->execute_on_target( target );
-
       const auto& tl = ricochet->target_list();
       if ( !tl.empty() )
-      {
-        auto second = rng().range( tl );
-        ricochet->execute_on_target( second );
-        if ( venomfang )
-          venomfang->execute_on_target( second );
-      }
+        ricochet->execute_on_target( rng().range( tl ) );
+    }
+
+    void impact( action_state_t* s ) override
+    {
+      generic_proc_t::impact( s );
+      if ( venomfang )
+        venomfang->execute_on_target( s->target );
     }
   };
 
@@ -3340,9 +3340,11 @@ void zuljins_guillotine_technique( special_effect_t& effect )
   {
     auto ricochet = debug_cast<guillotine_t*>( create_proc_action<guillotine_t>( "guillotine_ricochet", effect ) );
     ricochet->dual = true;
+    ricochet->has_2pc = true;
     ricochet->target_filter_callback = ricochet->secondary_targets_only();
     guillotine->add_child( ricochet );
     guillotine->ricochet = ricochet;
+    guillotine->has_2pc = true;
   }
 
   effect.execute_action = guillotine;
