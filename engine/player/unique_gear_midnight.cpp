@@ -3417,10 +3417,14 @@ void venomfang( special_effect_t& effect )
 
     buff_t* create_debuff( player_t* t ) override
     {
-      // SX_ASYNCRONOUS_STACKING_BUFF (attr 490) on spell 1306635 auto-sets ASYNCHRONOUS stack behavior
+      // SX_ASYNCRONOUS_STACKING_BUFF (attr 490) on spell 1306635 auto-sets ASYNCHRONOUS stack behavior.
+      // Each instance expiry decrements the async debuff by one, so fire the burst on every lost stack
+      // (the final stack clears via expire(), which also invokes the stack change callback). An
+      // expire_callback would only fire once, when the whole debuff clears, missing overlapping bursts.
       return make_buff<buff_t>( actor_pair_t( t, player ), "venomfang", &data() )
-        ->set_expire_callback( [ this ]( buff_t* b, int, timespan_t ) {
-            burst->execute_on_target( b->player );
+        ->set_stack_change_callback( [ this ]( buff_t* b, int old_, int cur ) {
+            if ( cur < old_ )
+              burst->execute_on_target( b->player );
           } );
     }
 
@@ -3429,14 +3433,17 @@ void venomfang( special_effect_t& effect )
       double m = generic_proc_t::composite_ta_multiplier( s );
       if ( auto debuff = find_debuff( s->target ) )
         m *= debuff->check();
+      else
+        m = 0.0;  // no active instances => no tick damage (mirrors root_rot)
       return m;
     }
 
     void trigger_dot( action_state_t* s ) override
     {
       generic_proc_t::trigger_dot( s );
-      auto duration = calculate_dot_refresh_duration( get_dot( s->target ), dot_duration );
-      get_debuff( s->target )->trigger( duration + 1_ms );
+      // Debuff mirrors the freshly-refreshed DoT (+1ms to outlast the final tick). Read remains()
+      // directly instead of recomputing the refresh duration, which overshoots by a tick on first cast.
+      get_debuff( s->target )->trigger( get_dot( s->target )->remains() + 1_ms );
     }
   };
 
@@ -4381,7 +4388,9 @@ void register_special_effects()
   register_special_effect( { 1253357, 1253359 }, weapons::torments_duality );  // umbral sabre & radiant foil
   register_special_effect( 1266257, weapons::lightless_lament );
   register_special_effect( 1250529, weapons::murder_row_fishhook );
-  register_special_effect( 1291718, weapons::venomfang );  // Aman'muso, Warlord's Vengeance & Maze-Roa, Warlord's Fury
+  set_min_version( wowv_t( 12, 1, 0 ) );
+  register_special_effect( 1291718, weapons::venomfang );  // Aman'muso, Warlord's Vengeance & Maze-Roa, Warlord's Fury (Bite of Zul'jan set)
+  reset_version_check();
   // Armor
   register_special_effect( 1271211, armors::eternal_voidsong_chain );
   register_special_effect( 1243883, armors::necrotic_hexweave );
