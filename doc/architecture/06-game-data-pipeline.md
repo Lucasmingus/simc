@@ -13,7 +13,7 @@ flowchart TD
     CASC -->|.dbc / .db2 binary tables| DBCEXT["dbc_extract3\n(dbc_extract3/dbc_extract.py)"]
     DBCEXT -->|C++ .inc initializer files| GEND["engine/dbc/generated/\n(sc_spell_data.inc, item_data.inc, …)"]
     GEND -->|#included at compile time| SPELL["engine/dbc/spell_data.cpp"]
-    SPELL -->|compiled into dbc_t access layer| DBC["engine/dbc/dbc.hpp\n(dbc_t, spell_data_t)"]
+    SPELL -->|static arrays linked into dbc_t| DBC["engine/dbc/dbc.hpp\n(dbc_t; spell_data_t via spell_data.hpp)"]
     DBC -->|runtime spell lookups| ENG["engine\n(sim / player / class_modules)"]
 ```
 
