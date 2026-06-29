@@ -3276,6 +3276,37 @@ void font_of_venomous_rage( special_effect_t& effect )
 
   effect.execute_action = create_proc_action<font_channel_t>( "font_of_venemous_rage", effect );
 }
+
+// Zul'jin's Guillotine Technique
+// 1291728 driver (RPPM equip proc, 3 RPPM haste)
+// 1306604 Guillotine damage
+void zuljins_guillotine_technique( special_effect_t& effect )
+{
+  struct guillotine_t : public generic_proc_t
+  {
+    double missing_hp_mult;
+
+    guillotine_t( const special_effect_t& e ) :
+      generic_proc_t( e, "guillotine", e.player->find_spell( 1306604 ) ),
+      missing_hp_mult( e.driver()->effectN( 2 ).percent() )
+    {
+      base_dd_min = base_dd_max = e.driver()->effectN( 1 ).average( e );
+      base_multiplier *= role_mult( e );
+    }
+
+    double composite_da_multiplier( const action_state_t* s ) const override
+    {
+      double m = generic_proc_t::composite_da_multiplier( s );
+      double pct_missing = 100.0 - s->target->health_percentage();
+      m *= 1.0 + missing_hp_mult * pct_missing;
+      return m;
+    }
+  };
+
+  effect.execute_action = create_proc_action<guillotine_t>( "guillotine", effect );
+
+  new dbc_proc_callback_t( effect.player, effect );
+}
 }  // namespace trinkets
 
 namespace weapons
@@ -4320,6 +4351,7 @@ void register_special_effects()
   register_special_effect( 1297908, trinkets::font_of_venomous_rage );
   register_special_effect( 1297911, DISABLED_EFFECT );  // Font of Venomous Rage equip driver
   register_special_effect( 1292291, trinkets::gebbos_bottomless_bag );
+  register_special_effect( 1291728, trinkets::zuljins_guillotine_technique );
   reset_version_check();
   // Weapons
   register_special_effect( { 1253357, 1253359 }, weapons::torments_duality );  // umbral sabre & radiant foil
