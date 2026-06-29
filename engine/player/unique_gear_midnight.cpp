@@ -3323,8 +3323,7 @@ void zuljins_guillotine_technique( special_effect_t& effect )
       if ( venomfang )
         venomfang->execute_on_target( target );
 
-      auto tl = target_list();
-      range::erase_remove( tl, target );
+      const auto& tl = ricochet->target_list();
       if ( !tl.empty() )
       {
         auto second = rng().range( tl );
@@ -3341,6 +3340,7 @@ void zuljins_guillotine_technique( special_effect_t& effect )
   {
     auto ricochet = debug_cast<guillotine_t*>( create_proc_action<guillotine_t>( "guillotine_ricochet", effect ) );
     ricochet->dual = true;
+    ricochet->target_filter_callback = ricochet->secondary_targets_only();
     guillotine->add_child( ricochet );
     guillotine->ricochet = ricochet;
   }
