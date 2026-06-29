@@ -3280,11 +3280,15 @@ void font_of_venomous_rage( special_effect_t& effect )
 // Zul'jin's Guillotine Technique
 // 1291728 driver (RPPM equip proc, 3 RPPM haste)
 // 1306604 Guillotine damage
+// 2pc Bite of Zul'jan (1291726): ricochets to a second nearby enemy for 100% damage,
+//   applying Venomfang to both targets
 void zuljins_guillotine_technique( special_effect_t& effect )
 {
   struct guillotine_t : public generic_proc_t
   {
     double missing_hp_mult;
+    action_t* ricochet = nullptr;
+    action_t* venomfang = nullptr;
 
     guillotine_t( const special_effect_t& e ) :
       generic_proc_t( e, "guillotine", e.player->find_spell( 1306604 ) ),
@@ -3301,9 +3305,47 @@ void zuljins_guillotine_technique( special_effect_t& effect )
       m *= 1.0 + missing_hp_mult * pct_missing;
       return m;
     }
+
+    void init_finished() override
+    {
+      generic_proc_t::init_finished();
+      if ( ricochet )
+        venomfang = player->find_action( "venomfang" );
+    }
+
+    void execute() override
+    {
+      generic_proc_t::execute();
+
+      if ( !ricochet )
+        return;
+
+      if ( venomfang )
+        venomfang->execute_on_target( target );
+
+      auto tl = target_list();
+      range::erase_remove( tl, target );
+      if ( !tl.empty() )
+      {
+        auto second = rng().range( tl );
+        ricochet->execute_on_target( second );
+        if ( venomfang )
+          venomfang->execute_on_target( second );
+      }
+    }
   };
 
-  effect.execute_action = create_proc_action<guillotine_t>( "guillotine", effect );
+  auto guillotine = debug_cast<guillotine_t*>( create_proc_action<guillotine_t>( "guillotine", effect ) );
+
+  if ( effect.player->sets->has_set_bonus( effect.player->specialization(), MID_BOZ, B2 ) )
+  {
+    auto ricochet = debug_cast<guillotine_t*>( create_proc_action<guillotine_t>( "guillotine_ricochet", effect ) );
+    ricochet->dual = true;
+    guillotine->add_child( ricochet );
+    guillotine->ricochet = ricochet;
+  }
+
+  effect.execute_action = guillotine;
 
   new dbc_proc_callback_t( effect.player, effect );
 }
@@ -4436,6 +4478,7 @@ void register_special_effects()
   register_special_effect( 1253358, DISABLED_EFFECT );  // torments duality
   register_special_effect( 253819, sets::umbral_shift );
   register_special_effect( 1290152, DISABLED_EFFECT ); // umbral shift equip effect
+  register_special_effect( 1291726, DISABLED_EFFECT );  // Bite of Zul'jan 2pc driver (logic in guillotine trinket)
   // Omnium Folio
   set_min_version( wowv_t( 12, 0, 7 ) );
   register_special_effect( 1279599, omnium::rune_of_unleashed_fire );
