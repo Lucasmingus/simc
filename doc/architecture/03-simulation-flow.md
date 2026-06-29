@@ -28,8 +28,9 @@ sequenceDiagram
     loop N iterations (work_queue)
         sim_t->>sim_t: combat()
         sim_t->>sim_t: combat_begin() — reset state, seed events
-        sim_t->>player_t: player_t::combat_begin() — precombat actions, player_ready event
+        sim_t->>player_t: player_t::precombat_init() → arise() → schedule_ready() — seed player_ready_event_t
         player_t-->>event_manager_t: make_event player_ready_event_t
+        sim_t->>player_t: player_t::combat_begin() — execute precombat action list
         sim_t->>event_manager_t: event_mgr.execute() — drain priority queue
         event_manager_t->>event_manager_t: while next_event() → e->execute()
         event_manager_t-->>sim_t: queue empty
@@ -69,19 +70,19 @@ The first action inside `sim_t::main()` is CLI and profile parsing. A `sim_contr
 
 ### Phase 2 — Build
 
-With the control object populated, `sim_t::main()` calls `setup(&control)` (`engine/sc_main.cpp:287`), dispatching to `sim_t::setup()` (`engine/sim/sim.cpp:4281`). Setup walks `control->options` twice: once to apply global options via `parse_option()` (`engine/sim/sim.cpp:4296`), and once to create player objects. For each entry in `control->players`, `player_t::create()` (`engine/player/player.cpp:13633`) instantiates the correct class module and registers the new `player_t*` into `sim_t::player_no_pet_list` and `actor_list`. Player-scoped options are then bound to the corresponding `player_t`.
+With the control object populated, `sim_t::main()` calls `setup(&control)` (`engine/sc_main.cpp:287`), dispatching to `sim_t::setup()` (`engine/sim/sim.cpp:4281`). Setup walks `control->options` twice: once to apply global options via `parse_option()` (`engine/sim/sim.cpp:4296`), and once to create player objects. For each entry in `control->players`, `player_t::create()` (defined at `engine/player/player.cpp:13633`; called from `engine/sim/sim.cpp:4310`) instantiates the correct class module and registers the new `player_t*` into `sim_t::player_no_pet_list` and `actor_list`. Player-scoped options are then bound to the corresponding `player_t`.
 
 ### Phase 3 — Init (per thread, inside iterate)
 
 `sim_t::execute()` (`engine/sim/sim.cpp:3428`) is called from `sim_t::main()` at `engine/sc_main.cpp:359`. It calls `partition()` to spread work across child `sim_t` threads, then calls `iterate()` (`engine/sim/sim.cpp:3459`).
 
-`sim_t::iterate()` (`engine/sim/sim.cpp:3114`) begins with a single call to `sim_t::init()` (`engine/sim/sim.cpp:2615`). Init seeds the RNG, resolves spell data, and drives `sim_t::init_actors()` (`engine/sim/sim.cpp:2488`), which calls `sim_t::init_actor()` for every target and then every player. Per-player init walks the registered actor-initializer list in priority order, covering race/position/professions, talents, gear, and finally the Action Priority List via `player_t::init_action_list()` (`engine/player/player.cpp:4154`).
+`sim_t::iterate()` (`engine/sim/sim.cpp:3114`) begins with a single call to `sim_t::init()` (`engine/sim/sim.cpp:2615`). Init seeds the RNG, resolves spell data, and drives `sim_t::init_actors()` (`engine/sim/sim.cpp:2488`), which calls `sim_t::init_actor()` for every target and then every player. Per-player init walks the registered actor-initializer list in priority order, covering race/position/professions, talents, gear, and finally the Action Priority List via `player_t::init_action_list()` (virtual; the call site is at `engine/player/player.cpp:4154`, inside `create_actions()`).
 
 ### Phase 4 — Iterate × N
 
 After init, `sim_t::iterate()` loops (do–while at `engine/sim/sim.cpp:3137–3171`) consuming work units from `work_queue` — one unit per actor in `single_actor_batch` mode or one per full-raid iteration otherwise. Each iteration calls `sim_t::combat()` (`engine/sim/sim.cpp:1780`), which executes three steps in sequence (`engine/sim/sim.cpp:1790-1792`):
 
-1. **`combat_begin()`** (`engine/sim/sim.cpp:1842`) — resets all state via `reset()` (`engine/sim/sim.cpp:1865`), which clears buffs, resets targets and players, and reseeds the RNG for deterministic runs. After reset, `sim_t::combat_begin()` calls `player_t::combat_begin()` (`engine/player/player.cpp:6130`) for each active player. Each player executes its precombat action list and then posts a `player_ready_event_t` into the event manager, seeding the queue for the upcoming iteration.
+1. **`combat_begin()`** (`engine/sim/sim.cpp:1842`) — resets all state via `reset()` (`engine/sim/sim.cpp:1865`), which clears buffs, resets targets and players, and reseeds the RNG for deterministic runs. After reset, `sim_t::combat_begin()` runs two passes over the player list. In the first pass it calls `player_t::precombat_init()` (`engine/player/player.cpp:6117`) for each player; `precombat_init()` calls `arise()` (`engine/player/player.cpp:7022`), which calls `schedule_ready()` at `engine/player/player.cpp:7079`; `schedule_ready()` (defined at `engine/player/player.cpp:6895`) posts a `player_ready_event_t` (`engine/player/player.cpp:6997`) into the event manager, seeding the queue for the upcoming iteration. In the second pass, `sim_t::combat_begin()` calls `player_t::combat_begin()` (`engine/player/player.cpp:6130`) for each player, which executes the precombat action list.
 
 2. **`event_mgr.execute()`** (`engine/sim/event_manager.cpp:205`) — the core simulation loop. `event_manager_t::execute()` runs a `while` loop (`engine/sim/event_manager.cpp:214`) that calls `next_event()` (`engine/sim/event_manager.cpp:360`) to dequeue the lowest-time event from the timing wheel, advances `current_time`, and dispatches `e->execute()`. Player-ready events fire the APL decision engine, producing action events; action events produce damage/healing events, buff events, and new player-ready events — the cycle continuing until `current_time` reaches `max_time` or the target dies.
 
@@ -93,4 +94,4 @@ After all iterations complete and child threads are merged back via `merge()`, `
 
 ### Phase 6 — Report
 
-Back in `sim_t::main()`, if `execute()` returned success, `report::print_suite()` (`engine/sc_main.cpp:368`) is called. Its definition at `engine/report/reports.cpp:236` drives three sequential output passes: `report::print_text()`, `report::print_json()`, and `report::print_html()` — the three functions declared in `engine/report/reports.hpp:34`.
+Back in `sim_t::main()`, `report::print_suite()` (`engine/sc_main.cpp:368`) is called only when several guards all pass (`engine/sc_main.cpp:359`): `execute()` must return success, `rethrow_exception_queue()` must find no queued exceptions, and the inner check `canceled == 0 && !profilesets->iterate(this)` at `engine/sc_main.cpp:365` must be false (i.e., either there is an outstanding cancellation or profilesets have finished iterating). Its definition at `engine/report/reports.cpp:236` drives three sequential output passes: `report::print_text()`, `report::print_json()`, and `report::print_html()` — the three functions declared in `engine/report/reports.hpp:34`.
