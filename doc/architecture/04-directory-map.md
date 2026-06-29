@@ -22,7 +22,7 @@ simc/
 ├── source_files/    # Build-system manifests (CMake / qmake / VS / Make)
 ├── cmake/           # CMake helper modules
 ├── doc/             # Doxygen configuration and this architecture guide
-└── lib/             # (top-level) unused placeholder; vendored libs are in engine/lib/
+└── lib/             # (top-level) qmake static-lib build-target stub; vendored libs are in engine/lib/
 ```
 
 ---
@@ -36,7 +36,7 @@ simc/
 | `engine/action` | Combat action hierarchy: `action_t`, `spell_t`, `attack_t`, `heal_t`, `absorb_t`; computes damage/healing state and drives DOT ticking. | `engine/action/action.hpp:1` |
 | `engine/buff` | Buff and debuff system: `buff_t` base class plus typed sub-classes; manages stacks, durations, refresh/expire hooks, and stat-buff application. | `engine/buff/buff.hpp:1` |
 | `engine/class_modules` | Per-class simulation logic: one `.cpp` per WoW class plus dedicated sub-modules for Monk, Paladin, Priest, and Warlock; all register via the `class_module.hpp` interface. | `engine/class_modules/class_module.hpp:1` |
-| `engine/dbc` | Data-by-client (spell database): parsed WoW spell tables, hotfix overlays, azerite/embellishment data, talent trees, and spell-query expressions. | `engine/dbc/dbc.hpp:1` |
+| `engine/dbc` | DataBase Client (DBC) (spell database): parsed WoW spell tables, hotfix overlays, azerite/embellishment data, talent trees, and spell-query expressions. | `engine/dbc/dbc.hpp:1` |
 | `engine/item` | Item system: item loading, socket and equip effects, enchant application, and `special_effect_t` dispatch to unique-gear handlers. | `engine/item/item.hpp:1` |
 | `engine/report` | Output report generation: HTML, text, and JSON formats; Highcharts chart data; gear-weight calculations and decorators. | `engine/report/reports.hpp:1` |
 | `engine/interfaces` | External API clients: Battle.net/Armory (BCP API), HTTP layer with libcurl and WinINet backends, and a WoWHead connector. | `engine/interfaces/bcp_api.hpp:1` |

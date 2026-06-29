@@ -25,7 +25,7 @@ flowchart TD
         RPT[report]
     end
 
-    ENGINE -->|consumes| DBCDATA
+    DBCDATA -->|consumed by| ENGINE
     RPT -->|output| OUT["HTML / JSON / text"]
 ```
 
@@ -39,7 +39,7 @@ The diagram shows three top-level data flows: (1) WoW client data is extracted a
 
 The simulation engine (`engine/sc_main.cpp:1`) is the heart of the project — a multi-player, event-driven C++ simulator written to C++17. `sc_main.cpp` parses command-line options, constructs a top-level `sim_t` object, and delegates everything else to the engine subsystems listed below. The engine is also the only component that is compiled into both the CLI and the Qt GUI executables.
 
-Key engine subsystems visible in the `sc_main.cpp` include list:
+Key engine subsystems reachable from `sc_main.cpp`'s includes:
 
 - **sim** (`engine/sim/sim.hpp:1`): owns the event queue, raid layout, scale-factor sweeps, profilesets, and progress reporting. `sim_t` is the root object of every simulation run.
 - **player** (`engine/player/player.hpp:1`): the `player_t` base class models a single character — stat caches, gear, action-priority list scheduling, azerite data, and unique-gear dispatch all live here.

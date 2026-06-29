@@ -90,7 +90,7 @@ After init, `sim_t::iterate()` loops (do–while at `engine/sim/sim.cpp:3137–3
 
 ### Phase 5 — Analyze
 
-After all iterations complete and child threads are merged back via `merge()`, `sim_t::execute()` calls `sim_t::analyze()` (`engine/sim/sim.cpp:3462`), which is defined at `engine/sim/sim.cpp:3013`. Analyze calls `collected_data.analyze()` for every actor, sorts player lists by DPS/HPS/DTPS/APM, and calls `analyze_iteration_data()` to build the best/worst-iteration tables used for deterministic replay.
+After all iterations complete and child threads are merged back via `merge()`, `sim_t::execute()` calls `sim_t::analyze()` (`engine/sim/sim.cpp:3463`), which is defined at `engine/sim/sim.cpp:3013`. Analyze calls `collected_data.analyze()` for every actor, sorts player lists by DPS/HPS/DTPS/APM, and calls `analyze_iteration_data()` to build the best/worst-iteration tables used for deterministic replay.
 
 ### Phase 6 — Report
 
