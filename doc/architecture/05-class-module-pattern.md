@@ -126,7 +126,7 @@ Runs after `init_spells`. When no user-supplied APL string is present it calls i
 struct mage_module_t final : public module_t
 ```
 
-At the bottom of the translation unit, `mage_module_t` implements the `module_t` interface (`engine/class_modules/class_module.hpp:19`). Its `create_player()` override (the pure virtual declared at `engine/class_modules/class_module.hpp:26`) allocates a `mage_t` and attaches the reporting extension. `register_hotfixes()` applies any spell-data corrections needed before the first iteration.
+At the bottom of the translation unit, `mage_module_t` implements the `module_t` interface (`engine/class_modules/class_module.hpp:20`). Its `create_player()` override (the pure virtual declared at `engine/class_modules/class_module.hpp:27`) allocates a `mage_t` and attaches the reporting extension. `register_hotfixes()` applies any spell-data corrections needed before the first iteration.
 
 **9. Module factory** — `engine/class_modules/sc_mage.cpp:7499`
 
