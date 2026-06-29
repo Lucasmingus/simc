@@ -3418,6 +3418,62 @@ void murder_row_fishhook( special_effect_t& effect )
 
   new dbc_proc_callback_t( effect.player, effect );
 }
+
+// Venomfang
+// 1291718 driver (RPPM 5, Haste multiplier)
+// Used by: Aman'muso, Warlord's Vengeance (268209) and Maze-Roa, Warlord's Fury (268213)
+// 1306635 Venomfang DoT (Nature, 6s, ticks every 1s, bursts on expiry)
+// 1306639 Venomfang Burst (AoE Nature, 8yd, fires on DoT expiry)
+// Multiple applications overlap: single refreshing DoT, ASYNCHRONOUS debuff tracks independent instances,
+// tick damage scales with active instance count, each instance expiry fires the burst
+void venomfang( special_effect_t& effect )
+{
+  auto burst = create_proc_action<generic_aoe_proc_t>( "venomfang_burst", effect, 1306639 );
+  burst->base_dd_min = burst->base_dd_max = effect.driver()->effectN( 2 ).average( effect );
+  burst->base_multiplier *= role_mult( effect );
+
+  struct venomfang_dot_t : public generic_proc_t
+  {
+    action_t* burst;
+
+    venomfang_dot_t( const special_effect_t& e, action_t* b )
+      : generic_proc_t( e, "venomfang", e.player->find_spell( 1306635 ) ), burst( b )
+    {
+      dot_max_stack = 1;
+      dot_behavior  = dot_behavior_e::DOT_REFRESH_DURATION;
+      base_td       = e.driver()->effectN( 1 ).average( e );
+      base_td_multiplier *= role_mult( e );
+      add_child( burst );
+    }
+
+    buff_t* create_debuff( player_t* t ) override
+    {
+      // SX_ASYNCRONOUS_STACKING_BUFF (attr 490) on spell 1306635 auto-sets ASYNCHRONOUS stack behavior
+      return make_buff<buff_t>( actor_pair_t( t, player ), "venomfang", &data() )
+        ->set_expire_callback( [ this ]( buff_t* b, int, timespan_t ) {
+            burst->execute_on_target( b->player );
+          } );
+    }
+
+    double composite_ta_multiplier( const action_state_t* s ) const override
+    {
+      double m = generic_proc_t::composite_ta_multiplier( s );
+      if ( auto debuff = find_debuff( s->target ) )
+        m *= debuff->check();
+      return m;
+    }
+
+    void trigger_dot( action_state_t* s ) override
+    {
+      generic_proc_t::trigger_dot( s );
+      auto duration = calculate_dot_refresh_duration( get_dot( s->target ), dot_duration );
+      get_debuff( s->target )->trigger( duration + 1_ms );
+    }
+  };
+
+  effect.execute_action = create_proc_action<venomfang_dot_t>( "venomfang", effect, burst );
+  new dbc_proc_callback_t( effect.player, effect );
+}
 }  // namespace weapons
 
 namespace armors
@@ -4357,6 +4413,7 @@ void register_special_effects()
   register_special_effect( { 1253357, 1253359 }, weapons::torments_duality );  // umbral sabre & radiant foil
   register_special_effect( 1266257, weapons::lightless_lament );
   register_special_effect( 1250529, weapons::murder_row_fishhook );
+  register_special_effect( 1291718, weapons::venomfang );  // Aman'muso, Warlord's Vengeance & Maze-Roa, Warlord's Fury
   // Armor
   register_special_effect( 1271211, armors::eternal_voidsong_chain );
   register_special_effect( 1243883, armors::necrotic_hexweave );
