@@ -3321,10 +3321,6 @@ void zuljins_guillotine_technique( special_effect_t& effect )
       if ( !ricochet )
         return;
 
-      // secondary_targets_only() excludes ricochet->target. The ricochet is single-target, so a prior
-      // execute_on_target() leaves its target on the last bounce victim without invalidating the cache
-      // (set_target only invalidates when n_targets() != 0). Re-point at the primary and force a
-      // recompute each cast, else an add/death cache refresh could let the ricochet land on the primary.
       ricochet->set_target( target );
       ricochet->target_cache.is_valid = false;
       const auto& tl = ricochet->target_list();
