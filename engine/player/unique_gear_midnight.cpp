@@ -3389,15 +3389,14 @@ void murder_row_fishhook( special_effect_t& effect )
 }
 
 // Zatha'tek, Breath of Corruption
-// 1298023 driver (RPPM 2.5, Haste multiplier)
-// 1305391 Necrotic Tear (stacking target debuff, persists until death, +5% dmg per stack, max 10)
+// 1298023 driver (RPPM 2.5, Haste multiplier; effectN(2) = +5% damage per Necrotic Tear stack)
+// 1305391 Necrotic Tear (stacking target debuff, persists until death, max 10 stacks)
 // 1305395 Breath of Corruption (direct Nature damage, increased by Necrotic Tear stacks)
 void zathatek_breath_of_corruption( special_effect_t& effect )
 {
   struct breath_of_corruption_t : public generic_proc_t
   {
-    buff_t* necrotic_tear;
-    double stack_mod;
+    const double stack_mod;
 
     breath_of_corruption_t( const special_effect_t& e )
       : generic_proc_t( e, "breath_of_corruption", e.player->find_spell( 1305395 ) ),
@@ -3406,21 +3405,27 @@ void zathatek_breath_of_corruption( special_effect_t& effect )
       base_dd_min = base_dd_max = e.driver()->effectN( 1 ).average( e );
       base_multiplier *= role_mult( e );
 
-      necrotic_tear = make_buff( e.player, "necrotic_tear", e.player->find_spell( 1305391 ) );
+      // Necrotic Tear is a per-target debuff that persists until the target dies.
+      // max_stack (10) and infinite duration are inherited from the spell data.
+      target_debuff = e.player->find_spell( 1305391 );
     }
 
     double composite_da_multiplier( const action_state_t* s ) const override
     {
       double m = generic_proc_t::composite_da_multiplier( s );
-      if ( necrotic_tear->check() )
-        m *= 1.0 + necrotic_tear->check() * stack_mod;
+
+      if ( auto debuff = find_debuff( s->target ) )
+        m *= 1.0 + debuff->check() * stack_mod;
+
       return m;
     }
 
     void impact( action_state_t* s ) override
     {
+      // Damage is snapshot before impact, so this hit benefits from the stacks
+      // already on the target, then applies one more.
       generic_proc_t::impact( s );
-      necrotic_tear->trigger();
+      get_debuff( s->target )->trigger();
     }
   };
 
