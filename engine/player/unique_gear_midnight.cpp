@@ -3389,7 +3389,7 @@ void murder_row_fishhook( special_effect_t& effect )
 }
 
 // Zatha'tek, Breath of Corruption
-// 1298023 driver (RPPM 2.5, Haste multiplier; effectN(2) = +5% damage per Necrotic Tear stack)
+// 1298023 driver
 // 1305391 Necrotic Tear (stacking target debuff, persists until death, max 10 stacks)
 // 1305395 Breath of Corruption (direct Nature damage, increased by Necrotic Tear stacks)
 void zathatek_breath_of_corruption( special_effect_t& effect )

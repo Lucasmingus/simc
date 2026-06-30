@@ -1,0 +1,142 @@
+# Melethas - Windwalker - 2026-06-25 15:32 - /Anasterian
+# SimC Addon 12.1.0-alpha-03
+# WoW 12.1.0.68301, TOC 120100
+# Requires SimulationCraft 1000-01 or newer
+ptr=1
+fight_style=DungeonRoute
+max_time=300
+enemy=Dummy
+raid_events+=/pull,pull=01,bloodlust=1,shared_health=1,delay=1,enemies="BOSS_1tar":16c:Humanoid
+raid_events+=/pull,pull=02,shared_health=1,enemies="9tar":100c:Humanoid:9
+
+#iterations=1000
+log=1
+html=output.html
+
+monk="Melethas"
+level=90
+race=blood_elf
+region=
+server=anasterian
+role=attack
+professions=tailoring=68/enchanting=75
+spec=windwalker
+# loot_spec=windwalker
+
+talents=C0QAQnG51S19isUJoJoTeJ/IKPzYMghZZmZ2mxAAAAAAAAAAAALDzEmhhBMjhZmZGmthZYWmJAgNzsNGGzMDEAbAoZZWamZmFghBmZAglxAGwA
+
+# Saved Loadout: Pan M+
+# talents=C0QAQnG51S19isUJoJoTeJ/IK/AzYAegZGbzMWmZGAAAAAAAAAAAYZYAzwwAGGmHYmZY2YmhZZGAALjZZYmhZGAAbmZZ2GjZZWMzMzCwMAAAAAA
+# Saved Loadout: Raid Cleave
+# talents=C0QAQnG51S19isUJoJoTeJ/IK/AzYmhxDMMLzMjZGAAAAAAAAAAAwywAmBMgxMj5BmZGmthZwyMAAWGzyAMzMAAWMzysNGAAMMDAAAAAA
+# Saved Loadout: Raid ST
+# talents=C0QAQnG51S19isUJoJoTeJ/IKPzYMghZZmZ2mxAAAAAAAAAAAALDDYGGGwMGmZmZY2GmhZZGAAbmZbMMmZGAAbAwsMLmZmZBYYgZGAGLzAMgB
+# Saved Loadout: Raid Winds
+# talents=C0QAQnG51S19isUJoJoTeJ/IK/AzYAeghZZGDAAAAAAAAAAAAADMDYAAAAAegBAAsAYmZAAsglZbMAAAAAAAAAA
+# Saved Loadout: M+
+# talents=C0QAQnG51S19isUJoJoTeJ/IKPzYMghZZmZ2mxAAAAAAAAAAAALDzAzwwAmxwMzMDz2wMMLzAAYzMbjhxMzAAYDAmlZxMzMLADDMzAALjBMgB
+# Saved Loadout: Dungeon
+# talents=C0QAQnG51S19isUJoJoTeJ/IKbGjhZegxMmZGzMDAAAAAAAAAAAsMMDMDDDYYYegZmhZbYGsMDAglxsMYYmZAAsYmlZbMAAAzAAAAAAA
+# Saved Loadout: Delve
+# talents=C0QAQnG51S19isUJoJoTeJ/IK/AzYAegxMbzMjZmBAAAAAAAAAAAWGmBmhhBMMj5BmZGmthZwyMAAWGzyYmBzMAA2AgZZWMzMzCwMAAAAAA
+# Saved Loadout: Raid Jade
+# talents=C0QAQnG51S19isUJoJoTeJ/IK/AzYmhxDMMLzMjZGAAAAAAAAAAAwywAmBMgxMj5BmZGmthZwyMAAWGzyghZmBAwiZWmtxAAAMDAAAAAA
+# Saved Loadout: Raid Fury
+# talents=C0QAQnG51S19isUJoJoTeJ/IK/AzYmhxDMMLzMjZGAAAAAAAAAAAwywAmBMgxMj5BmZGmthZwyMAAWGzywMMzMAAWMzysNGAAADAAAAAA
+# Saved Loadout: Dungeon SlicingWinds
+# talents=C0QAQnG51S19isUJoJoTeJ/IKbGjhZeghZZmZMzMAAAAAAAAAAAwywAmhhBMMMPwMzwsxMDzyMAAWGzywMMzMAAWMzysNGAAMAAAAAAA
+# Saved Loadout: Pan Raid
+# talents=C0QAQnG51S19isUJoJoTeJ/IK/AzMDwDMMLzMWmZGAAAAAAAAAAAYZYAzAGwYmx8AzMDz2wMYZGAALjZZYmhZGAAbAwsMLmZmZBYGAAAAAA
+
+# Fearsome Visage of Ra-den's Chosen (276)
+head=,id=250015,enchant_id=7961,bonus_id=13334/13338/6652/12667/13575/12798,content_tuning=1040
+# Barbed Ymirheim Choker (276)
+neck=,id=50228,gem_id=240983,bonus_id=13440/6652/13668/12699/12798,content_tuning=1279
+# Aurastones of Ra-den's Chosen (276)
+shoulder=,id=250013,enchant_id=8031,bonus_id=6652/13340/13574/12798
+# Defiant Defender's Drape (276)
+back=,id=260312,bonus_id=13440/6652/13577/12699/12798,content_tuning=1279
+# Battle Garb of Ra-den's Chosen (276)
+chest=,id=250018,enchant_id=7987,bonus_id=13334/6652/13336/13575/12798
+# Guild Tabard (1)
+tabard=,id=5976,content_tuning=378
+# Silvermoon Agent's Deflectors (259)
+wrist=,id=244576,bonus_id=12214/13667/12497/12066/8960/12384/8790/12667,content_tuning=3615,crafted_stats=32/36,crafting_quality=5
+# Thunderfists of Ra-den's Chosen (289)
+hands=,id=250016,bonus_id=13337/13440/6652/13574/12806
+# Scorn-Scarred Shul'ka's Belt (276)
+waist=,id=249374,bonus_id=6652/12667/13577/13335/12802
+# Swiftsweepers of Ra-den's Chosen (276)
+legs=,id=250014,enchant_id=7937,bonus_id=6652/12798/13440/13339/13575/3161
+# Domanaar's Dire Treads (272)
+feet=,id=251121,enchant_id=7993,bonus_id=12801/13440/6652/13577/12699
+# Platinum Star Band (276)
+finger1=,id=193708,enchant_id=8025,gem_id=240890,bonus_id=13440/6652/13668/12699/12798,content_tuning=1279
+# Sickening Signet of Atroxus (250)
+finger2=,id=252258,enchant_id=8025,gem_id=240889,bonus_id=13439/6652/13668/12699/12782,content_tuning=3025
+# Zul'jin's Guillotine Technique (Bite of Zul'jan 2pc test)
+trinket1=,id=270173,bonus_id=40/13335/12854,content_tuning=883
+# Font of Venomous Rage (337)
+trinket2=,id=270168,bonus_id=40/13335/13848,content_tuning=883
+# Aman'muso, Warlord's Vengeance (Bite of Zul'jan 2pc test)
+main_hand=,id=268209,bonus_id=40/13335/12854,content_tuning=883
+# Polished Lightwood Channeler (weapon proc test)
+#main_hand=,id=273778,bonus_id=13440/12854
+
+#maze roa
+#main_hand=,id=268213,bonus_id=40/13335/13848,content_tuning=883
+
+
+
+#trinket1=vashniks_sanguine_rancor,id=270166,bonus_id=40/13335/12854,content_tuning=883
+
+### Gear from Bags
+#
+# Reshii Wraps (170)
+# back=,id=235499,enchant_id=7409,gem_id=238045,bonus_id=12401/9893/12258,content_tuning=3008
+#
+# Hara'ti Defender's Cord (263)
+# waist=,id=263267,bonus_id=13577/12790/12667,content_tuning=4240
+#
+# Refueling Orb (266)
+# trinket1=,id=250246,bonus_id=12795/13440/6652/12699,content_tuning=1279
+#
+# Emerald Coach's Whistle (266)
+# trinket1=,id=193718,bonus_id=12795/13440/6652/12699,content_tuning=1279
+#
+# Drum of Renewed Bonds (237)
+# trinket1=,id=248583,bonus_id=13183/6652/12774,content_tuning=3321
+#
+# Wavecaller's Seastone (328)
+# trinket1=,id=270167,bonus_id=40/13335/12854,content_tuning=883
+#
+# Lucky Lynx Locket (224)
+# trinket1=,id=265027,bonus_id=6652/12770,content_tuning=3321
+#
+# Crucible of Erratic Energies (263)
+# trinket1=,id=264507,bonus_id=12790,content_tuning=4240
+#
+# Litany of Lightblind Wrath (263)
+# trinket1=,id=249808,bonus_id=6652/13333/11215/12790,content_tuning=3606
+#
+# Rust-Covered Blunderbuss (68)
+# main_hand=,id=2774,bonus_id=6657,drop_level=90,content_tuning=70
+#
+# Inescapable Reach (276)
+# main_hand=,id=249302,bonus_id=6652/13334/12798
+
+### Weekly Reward Choices
+#
+### End of Weekly Reward Choices
+
+### Additional Character Info
+#
+# catalyst_currencies=3269:8/3378:7/2813:8/3116:8
+#
+# upgrade_currencies=i:232875:1
+#
+# slot_high_watermarks=0:276:289/1:276:276/2:276:289/3:276:289/4:276:298/5:276:289/6:272:289/7:259:285/8:289:289/9:250:289/10:328:328/11:276:289/12:276:295/13:10:266/14:0:240/15:0:165/16:10:266
+#
+# upgrade_achievements=19326/19397/19398/19577/40942/40943/40944/40945/41886/41887/41888/41892/42767/42770/61809
+
+# Checksum: 306b6c0f
