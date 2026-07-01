@@ -3448,6 +3448,19 @@ void murder_row_fishhook( special_effect_t& effect )
 
   new dbc_proc_callback_t( effect.player, effect );
 }
+
+// Sharpened Lightwood Slasher
+// 1296732 driver
+// 1296735 damage
+void sharpened_lightwood_slasher( special_effect_t& effect )
+{
+  auto damage = create_proc_action<generic_proc_t>( "searing_lightwood", effect, 1296735 );
+  damage->base_dd_min = damage->base_dd_max = effect.driver()->effectN( 1 ).average( effect );
+
+  effect.execute_action = damage;
+
+  new dbc_proc_callback_t( effect.player, effect );
+}
 }  // namespace weapons
 
 namespace armors
@@ -4388,6 +4401,9 @@ void register_special_effects()
   register_special_effect( { 1253357, 1253359 }, weapons::torments_duality );  // umbral sabre & radiant foil
   register_special_effect( 1266257, weapons::lightless_lament );
   register_special_effect( 1250529, weapons::murder_row_fishhook );
+  set_min_version( wowv_t( 12, 1, 0 ) );
+  register_special_effect( 1296732, weapons::sharpened_lightwood_slasher );
+  reset_version_check();
   // Armor
   register_special_effect( 1271211, armors::eternal_voidsong_chain );
   register_special_effect( 1243883, armors::necrotic_hexweave );
