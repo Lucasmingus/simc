@@ -3751,6 +3751,69 @@ void knot_of_writhing_serpents( special_effect_t& effect )
 
   new dbc_proc_callback_t( effect.player, effect );
 }
+
+// Ophidian Bone Whistle
+// 1306743 On-use driver, e1 triggers the snake after its misc value delay
+// 1294327 Spirit snake damage, e2 applies a hidden 180s self aura lasting the cooldown
+// 1296883 Equip effect, holds the damage value in e1 that both snakes trigger as a dummy
+// 1306744 Echo driver, cast by the next harmful ability once the snake aura has expired
+// 1296888 Echo spirit snake damage. e2 is a plain dummy rather than an aura, so the echo
+//         does not restart the cycle
+void ophidian_bone_whistle( special_effect_t& effect )
+{
+  // Both snakes deal the damage held by the equip effect, split among everything within 10y of the
+  // target. Being split, it does not get the usual per-target damage increase.
+  double damage = effect.player->find_spell( 1296883 )->effectN( 1 ).average( effect );
+
+  auto create_snake = [ &effect, damage ]( std::string_view name, unsigned snake_id, unsigned driver_id ) {
+    auto snake = create_proc_action<generic_aoe_proc_t>( name, effect, snake_id, false );
+    snake->base_dd_min = snake->base_dd_max = damage;
+    snake->base_multiplier *= role_mult( effect );
+    // Each driver triggers its snake after the delay held in its trigger effect's misc value, in ms.
+    snake->travel_delay = effect.player->find_spell( driver_id )->effectN( 1 ).misc_value1() * 0.001;
+    return snake;
+  };
+
+  auto snake = create_snake( "ophidian_bone_whistle", 1294327, 1306743 );
+  auto echo  = create_snake( "ophidian_bone_whistle_echo", 1296888, 1306744 );
+  snake->add_child( echo );
+
+  // Set when the snake aura falls off, and consumed by the next harmful ability.
+  auto armed = create_buff<buff_t>( effect.player, "spirit_snake_echo", effect.player->find_spell( 1306744 ) );
+
+  // 1306744 has no proc flags of its own, so they have to be set by hand. Confirmed in game to be
+  // consumed only by the next harmful ability, which PF2_CAST_DAMAGE matches by covering only
+  // foreground damaging casts.
+  auto echo_driver            = new special_effect_t( effect.player );
+  echo_driver->name_str       = "ophidian_bone_whistle_echo_driver";
+  echo_driver->spell_id       = 1306744;
+  echo_driver->proc_flags_    = PF_ALL_DAMAGE;
+  echo_driver->proc_flags2_   = PF2_CAST_DAMAGE;
+  echo_driver->execute_action = echo;
+  effect.player->special_effects.push_back( echo_driver );
+
+  auto echo_cb = new dbc_proc_callback_t( effect.player, *echo_driver );
+  echo_cb->activate_with_buff( armed, true );
+
+  // Sending the echo consumes the buff, which deactivates the callback until the next use.
+  effect.player->callbacks.register_callback_execute_function(
+      echo_driver->spell_id, [ armed, echo ]( const dbc_proc_callback_t* cb, auto, auto target, auto state ) {
+        echo->execute_on_target( cb->get_target( target, state ) );
+        armed->expire();
+      } );
+
+  // The on-use snake applies this aura for exactly as long as the trinket cooldown, so its natural
+  // expiry is what "when this ability finishes cooling down" keys off of. use_item_t triggers the
+  // buff and runs the action together.
+  effect.custom_buff = create_buff<buff_t>( effect.player, "ophidian_bone_whistle_aura",
+                                            effect.player->find_spell( 1294327 ) )
+                           ->set_expire_callback( [ armed ]( buff_t*, int, timespan_t remains ) {
+                             if ( remains == 0_ms )
+                               armed->trigger();
+                           } );
+
+  effect.execute_action = snake;
+}
 }  // namespace trinkets
 
 namespace weapons
@@ -4983,6 +5046,8 @@ void register_special_effects()
   register_special_effect( 1295832, DISABLED_EFFECT );  // Vexhul's Everflowing Gland equip driver
   register_special_effect( 1291728, bite_of_zuljan::zuljins_guillotine_technique );
   register_special_effect( 1293304, trinkets::knot_of_writhing_serpents );
+  register_special_effect( 1306743, trinkets::ophidian_bone_whistle );
+  register_special_effect( 1296883, DISABLED_EFFECT );  // Ophidian Bone Whistle equip driver
   reset_version_check();
   // Weapons
   register_special_effect( { 1253357, 1253359 }, weapons::torments_duality );  // umbral sabre & radiant foil
