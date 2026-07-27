@@ -4117,6 +4117,50 @@ void tattered_amani_war_banner( special_effect_t& effect )
   effect.disable_buff();
   effect.has_use_buff_override = true;
 }
+
+// Coiled Fangstone
+// 1293311 Driver
+//  e1: triggers Envenomed Bite after its misc value delay
+//  e2: number of bites
+//  e3: radius
+// 1295535 Envenomed Bite (split aoe dmg)
+// 1295491 Equip effect, e1 holds the per-bite damage
+// TODO: the data holds a single delay, so the bites are modelled as landing one delay apart.
+//       Confirm the spacing in game.
+void coiled_fangstone( special_effect_t& effect )
+{
+  unsigned equip_id = 1295491;
+  auto equip        = find_special_effect( effect.player, equip_id );
+  assert( equip && "Coiled Fangstone missing equip effect" );
+
+  struct envenomed_bite_t : public generic_aoe_proc_t
+  {
+    int bites;
+    timespan_t delay;
+
+    envenomed_bite_t( const special_effect_t& e )
+      : generic_aoe_proc_t( e, "envenomed_bite", e.player->find_spell( 1295535 ) ),
+        bites( static_cast<int>( e.driver()->effectN( 2 ).base_value() ) ),
+        delay( timespan_t::from_millis( e.driver()->effectN( 1 ).misc_value1() ) )
+    {
+      travel_delay = delay.total_seconds();
+    }
+
+    void execute() override
+    {
+      generic_aoe_proc_t::execute();
+
+      if ( bites > 1 )
+        make_repeating_event( *sim, delay, [ this ] { generic_aoe_proc_t::execute(); }, bites - 1 );
+    }
+  };
+
+  auto bite         = create_proc_action<envenomed_bite_t>( "envenomed_bite", effect );
+  bite->base_dd_min = bite->base_dd_max = equip->driver()->effectN( 1 ).average( effect );
+  bite->base_multiplier *= role_mult( effect );
+
+  effect.execute_action = bite;
+}
 }  // namespace trinkets
 
 namespace weapons
@@ -5356,6 +5400,8 @@ void register_special_effects()
   register_special_effect( 1295553, trinkets::vashniks_sanguine_rancor );
   register_special_effect( 1295833, trinkets::vexhuls_everflowing_gland );
   register_special_effect( 1295832, DISABLED_EFFECT );  // Vexhul's Everflowing Gland equip driver
+  register_special_effect( 1293311, trinkets::coiled_fangstone );
+  register_special_effect( 1295491, DISABLED_EFFECT );  // Coiled Fangstone equip driver
   register_special_effect( 1291728, bite_of_zuljan::zuljins_guillotine_technique );
   register_special_effect( 1293304, trinkets::knot_of_writhing_serpents );
   register_special_effect( 1294329, trinkets::ulateks_faithful );
