@@ -4125,8 +4125,6 @@ void tattered_amani_war_banner( special_effect_t& effect )
 //  e3: damage increase per successive bite
 // 1295535 Envenomed Bite (aoe dmg)
 // 1295491 Equip effect, e1 holds the base per-bite damage
-// TODO: in game the third bite applies e3 to only one enemy, the rest taking the unincreased
-//       hit. Assumed to be a PTR bug and modelled as increasing on every target.
 void coiled_fangstone( special_effect_t& effect )
 {
   unsigned equip_id = 1295491;
@@ -4138,35 +4136,48 @@ void coiled_fangstone( special_effect_t& effect )
     int bites;
     double bite_increase;
     int current_bite;
+    player_t* increased_target;
 
     envenomed_bite_t( const special_effect_t& e )
       : generic_proc_t( e, "envenomed_bite", e.player->find_spell( 1295535 ) ),
         bites( static_cast<int>( e.driver()->effectN( 2 ).base_value() ) ),
         bite_increase( e.driver()->effectN( 3 ).percent() ),
-        current_bite( 0 )
+        current_bite( 0 ),
+        increased_target( nullptr )
     {
       aoe          = -1;
       travel_delay = e.driver()->effectN( 1 ).misc_value1() * 0.001;
     }
 
-    // The tooltip describes a split plus the Meteor Scaling Token, but neither matches the game.
-    // Each target takes ( 6n + 20 ) / ( 13 * ( n + 1 ) ) of the single-target hit, measured exactly
-    // at 1, 2, 3 and 5 targets. The falloff stops at 5 - a 9 target cast hits for the same as a 5
-    // target one.
+    // BUG: the tooltip describes the damage as split and cites the Meteor Scaling Token, but the
+    // game applies neither. Each target instead takes ( 6n + 20 ) / ( 13 * ( n + 1 ) ) of the
+    // single-target hit, measured exactly at 1, 2, 3 and 5 targets, and the falloff stops at 5 - a
+    // 9 target cast hits for the same as a 5 target one. Modelled as observed; a split with the
+    // token would be roughly a third of this on 5 targets.
     double composite_aoe_multiplier( const action_state_t* s ) const override
     {
       double n = std::min( s->n_targets, 5u );
       return generic_proc_t::composite_aoe_multiplier( s ) * ( 6.0 * n + 20.0 ) / ( 13.0 * ( n + 1.0 ) );
     }
 
-    double action_multiplier() const override
+    // BUG: e3 reads as a flat increase per bite and behaves that way for every bite but the last,
+    // which increases on one random enemy only while the rest take the unincreased hit. Confirmed
+    // at 2, 3, 5 and 9 targets. Modelled as observed; intended behaviour would be ~5% more aoe
+    // damage.
+    double composite_target_da_multiplier( player_t* t ) const override
     {
-      return generic_proc_t::action_multiplier() * ( 1.0 + bite_increase * current_bite );
+      double m = generic_proc_t::composite_target_da_multiplier( t );
+
+      if ( current_bite == bites - 1 && t != increased_target )
+        return m;
+
+      return m * ( 1.0 + bite_increase * current_bite );
     }
 
     void execute() override
     {
       current_bite = 0;
+      pick_increased_target();
       generic_proc_t::execute();
 
       if ( bites > 1 )
@@ -4174,9 +4185,22 @@ void coiled_fangstone( special_effect_t& effect )
         // The spacing between bites is not in the spell data. Measured in game at ~0.4s.
         make_repeating_event( *sim, 400_ms, [ this ] {
           current_bite++;
+          pick_increased_target();
           generic_proc_t::execute();
         }, bites - 1 );
       }
+    }
+
+    void pick_increased_target()
+    {
+      increased_target = nullptr;
+
+      if ( current_bite != bites - 1 )
+        return;
+
+      const auto& tl = target_list();
+      if ( !tl.empty() )
+        increased_target = tl[ rng().range( tl.size() ) ];
     }
   };
 
