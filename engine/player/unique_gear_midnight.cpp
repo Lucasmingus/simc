@@ -4123,45 +4123,57 @@ void tattered_amani_war_banner( special_effect_t& effect )
 //  e1: triggers Envenomed Bite after its misc value delay
 //  e2: number of bites
 //  e3: damage increase per successive bite
-// 1295535 Envenomed Bite (split aoe dmg)
+// 1295535 Envenomed Bite (aoe dmg)
 // 1295491 Equip effect, e1 holds the base per-bite damage
+// TODO: in game the third bite applies e3 to only one enemy, the rest taking the unincreased
+//       hit. Assumed to be a PTR bug and modelled as increasing on every target.
 void coiled_fangstone( special_effect_t& effect )
 {
   unsigned equip_id = 1295491;
   auto equip        = find_special_effect( effect.player, equip_id );
   assert( equip && "Coiled Fangstone missing equip effect" );
 
-  struct envenomed_bite_t : public generic_aoe_proc_t
+  struct envenomed_bite_t : public generic_proc_t
   {
     int bites;
     double bite_increase;
     int current_bite;
 
     envenomed_bite_t( const special_effect_t& e )
-      : generic_aoe_proc_t( e, "envenomed_bite", e.player->find_spell( 1295535 ) ),
+      : generic_proc_t( e, "envenomed_bite", e.player->find_spell( 1295535 ) ),
         bites( static_cast<int>( e.driver()->effectN( 2 ).base_value() ) ),
         bite_increase( e.driver()->effectN( 3 ).percent() ),
         current_bite( 0 )
     {
+      aoe          = -1;
       travel_delay = e.driver()->effectN( 1 ).misc_value1() * 0.001;
+    }
+
+    // The tooltip describes a split plus the Meteor Scaling Token, but neither matches the game.
+    // Each target takes ( 6n + 20 ) / ( 13 * ( n + 1 ) ) of the single-target hit, measured exactly
+    // at 1, 2, 3 and 5 targets. TODO: unverified past 5 targets.
+    double composite_aoe_multiplier( const action_state_t* s ) const override
+    {
+      double n = s->n_targets;
+      return generic_proc_t::composite_aoe_multiplier( s ) * ( 6.0 * n + 20.0 ) / ( 13.0 * ( n + 1.0 ) );
     }
 
     double action_multiplier() const override
     {
-      return generic_aoe_proc_t::action_multiplier() * ( 1.0 + bite_increase * current_bite );
+      return generic_proc_t::action_multiplier() * ( 1.0 + bite_increase * current_bite );
     }
 
     void execute() override
     {
       current_bite = 0;
-      generic_aoe_proc_t::execute();
+      generic_proc_t::execute();
 
       if ( bites > 1 )
       {
         // The spacing between bites is not in the spell data. Measured in game at ~0.4s.
         make_repeating_event( *sim, 400_ms, [ this ] {
           current_bite++;
-          generic_aoe_proc_t::execute();
+          generic_proc_t::execute();
         }, bites - 1 );
       }
     }
