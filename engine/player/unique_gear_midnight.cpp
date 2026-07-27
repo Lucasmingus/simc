@@ -4151,10 +4151,11 @@ void coiled_fangstone( special_effect_t& effect )
 
     // The tooltip describes a split plus the Meteor Scaling Token, but neither matches the game.
     // Each target takes ( 6n + 20 ) / ( 13 * ( n + 1 ) ) of the single-target hit, measured exactly
-    // at 1, 2, 3 and 5 targets. TODO: unverified past 5 targets.
+    // at 1, 2, 3 and 5 targets. The falloff stops at 5 - a 9 target cast hits for the same as a 5
+    // target one.
     double composite_aoe_multiplier( const action_state_t* s ) const override
     {
-      double n = s->n_targets;
+      double n = std::min( s->n_targets, 5u );
       return generic_proc_t::composite_aoe_multiplier( s ) * ( 6.0 * n + 20.0 ) / ( 13.0 * ( n + 1.0 ) );
     }
 
