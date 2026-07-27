@@ -3761,12 +3761,15 @@ void knot_of_writhing_serpents( special_effect_t& effect )
 //         does not restart the cycle
 void ophidian_bone_whistle( special_effect_t& effect )
 {
-  // Both snakes deal the damage held by the equip effect, split among everything within 10y of the
-  // target. Being split, it does not get the usual per-target damage increase.
+  // Both snakes deal the damage held by the equip effect to everything within 10y of the target.
   double damage = effect.player->find_spell( 1296883 )->effectN( 1 ).average( effect );
 
   auto create_snake = [ &effect, damage ]( std::string_view name, unsigned snake_id, unsigned driver_id ) {
     auto snake = create_proc_action<generic_aoe_proc_t>( name, effect, snake_id, false );
+    // BUG: the tooltip says the damage is split among nearby enemies, but in game every enemy
+    // takes the full hit - a one target cast and a five target cast both dealt exactly the same
+    // damage per enemy. No per-target increase either.
+    snake->split_aoe_damage = false;
     snake->base_dd_min = snake->base_dd_max = damage;
     snake->base_multiplier *= role_mult( effect );
     // Each driver triggers its snake after the delay held in its trigger effect's misc value, in ms.
@@ -3778,7 +3781,8 @@ void ophidian_bone_whistle( special_effect_t& effect )
   auto echo  = create_snake( "ophidian_bone_whistle_echo", 1296888, 1306744 );
   snake->add_child( echo );
 
-  // Set when the snake aura falls off, and consumed by the next harmful ability.
+  // Set when the snake aura falls off, and consumed by the next harmful ability. In game this is
+  // buff 1296890, which has no row in the client data, so the echo driver stands in for it.
   auto armed = create_buff<buff_t>( effect.player, "spirit_snake_echo", effect.player->find_spell( 1306744 ) );
 
   // 1306744 has no proc flags of its own, so they have to be set by hand. Confirmed in game to be
