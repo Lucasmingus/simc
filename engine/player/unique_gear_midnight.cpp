@@ -4122,11 +4122,9 @@ void tattered_amani_war_banner( special_effect_t& effect )
 // 1293311 Driver
 //  e1: triggers Envenomed Bite after its misc value delay
 //  e2: number of bites
-//  e3: radius
+//  e3: damage increase per successive bite
 // 1295535 Envenomed Bite (split aoe dmg)
-// 1295491 Equip effect, e1 holds the per-bite damage
-// TODO: the data holds a single delay, so the bites are modelled as landing one delay apart.
-//       Confirm the spacing in game.
+// 1295491 Equip effect, e1 holds the base per-bite damage
 void coiled_fangstone( special_effect_t& effect )
 {
   unsigned equip_id = 1295491;
@@ -4136,22 +4134,36 @@ void coiled_fangstone( special_effect_t& effect )
   struct envenomed_bite_t : public generic_aoe_proc_t
   {
     int bites;
-    timespan_t delay;
+    double bite_increase;
+    int current_bite;
 
     envenomed_bite_t( const special_effect_t& e )
       : generic_aoe_proc_t( e, "envenomed_bite", e.player->find_spell( 1295535 ) ),
         bites( static_cast<int>( e.driver()->effectN( 2 ).base_value() ) ),
-        delay( timespan_t::from_millis( e.driver()->effectN( 1 ).misc_value1() ) )
+        bite_increase( e.driver()->effectN( 3 ).percent() ),
+        current_bite( 0 )
     {
-      travel_delay = delay.total_seconds();
+      travel_delay = e.driver()->effectN( 1 ).misc_value1() * 0.001;
+    }
+
+    double action_multiplier() const override
+    {
+      return generic_aoe_proc_t::action_multiplier() * ( 1.0 + bite_increase * current_bite );
     }
 
     void execute() override
     {
+      current_bite = 0;
       generic_aoe_proc_t::execute();
 
       if ( bites > 1 )
-        make_repeating_event( *sim, delay, [ this ] { generic_aoe_proc_t::execute(); }, bites - 1 );
+      {
+        // The spacing between bites is not in the spell data. Measured in game at ~0.4s.
+        make_repeating_event( *sim, 400_ms, [ this ] {
+          current_bite++;
+          generic_aoe_proc_t::execute();
+        }, bites - 1 );
+      }
     }
   };
 
