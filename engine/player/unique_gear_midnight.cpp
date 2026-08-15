@@ -4276,42 +4276,45 @@ void sharpened_lightwood_slasher( special_effect_t& effect )
   new dbc_proc_callback_t( effect.player, effect );
 }
 
-// Za'thek, Breath of Corruption
+// Zatha'tek, Breath of Corruption
 // 1298023 Driver
-// 1305391 Buff (contains damage coefficient)
-// 1305395 Damage
+//  e1: damage
+//  e2: damage increase per Necrotic Tear stack
+// 1305391 Necrotic Tear (stacking debuff)
+// 1305395 Breath of Corruption (damage)
+// Confirmed in-game: a proc does not benefit from the tear it applies.
 void zathek_breath_of_corruption( special_effect_t& effect )
 {
   struct breath_of_corruption_t : generic_proc_t
   {
-    buff_t* necrotic_tear;
+    const double stack_mod;
 
-    breath_of_corruption_t( const special_effect_t& effect )
-      : generic_proc_t( effect, "breath_of_corruption", effect.player->find_spell( 1305395 ) ), necrotic_tear( nullptr )
+    breath_of_corruption_t( const special_effect_t& e )
+      : generic_proc_t( e, "breath_of_corruption", e.player->find_spell( 1305395 ) ),
+        stack_mod( e.driver()->effectN( 2 ).percent() )
     {
-      auto buff = player->find_spell( 1305391 );
+      base_dd_min = base_dd_max = e.driver()->effectN( 1 ).average( e );
+      base_multiplier *= role_mult( e );
 
-      base_dd_min = base_dd_max = buff->effectN( 1 ).average( effect );
-      base_multiplier *= role_mult( effect );
-
-      necrotic_tear =
-          create_buff( player, "necrotic_tear", buff )->set_default_value( effect.driver()->effectN( 2 ).base_value() );
+      // max_stack (10) and infinite duration are inherited from the spell data
+      target_debuff = e.player->find_spell( 1305391 );
     }
 
-    void execute() override
+    double composite_target_da_multiplier( player_t* t ) const override
     {
-      generic_proc_t::execute();
+      double m = generic_proc_t::composite_target_da_multiplier( t );
 
-      necrotic_tear->trigger();
-    }
-
-    double composite_da_multiplier( const action_state_t* state ) const override
-    {
-      double m = generic_proc_t::composite_da_multiplier( state );
-
-      m *= 1.0 + necrotic_tear->stack_value();
+      if ( auto debuff = find_debuff( t ) )
+        m *= 1.0 + debuff->check() * stack_mod;
 
       return m;
+    }
+
+    void impact( action_state_t* s ) override
+    {
+      generic_proc_t::impact( s );
+
+      get_debuff( s->target )->trigger();
     }
   };
 
