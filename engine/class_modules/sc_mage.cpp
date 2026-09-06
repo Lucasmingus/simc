@@ -862,6 +862,7 @@ public:
   double composite_player_critical_damage_multiplier( const action_state_t*, school_e school ) const override;
   double composite_player_multiplier( school_e ) const override;
   double composite_player_target_multiplier( player_t*, school_e ) const override;
+  double composite_versus_multiplier( player_t* ) const override;
   double composite_spell_crit_chance() const override;
   double composite_player_pet_damage_multiplier( const action_state_t*, bool ) const override;
   double composite_attribute_multiplier( attribute_e ) const override;
@@ -2360,18 +2361,12 @@ struct hot_streak_spell_t : public custom_state_spell_t<fire_mage_spell_t, hot_s
 
     c += p()->buffs.hyperthermia->check_value();
 
+    // The spelldata for Pyroclasm and the 12.1 2pc doesn't seem to be used,
+    // so we're hardcoding it here as they probably did serverside.
+    if ( pyroclasm_active() && p()->sets->has_set_bonus( MAGE_FIRE, MID2, B2 ) )
+      c += 1.0;
+
     return c;
-  }
-
-  result_e calculate_result( action_state_t* s ) const override
-  {
-    result_e r = custom_state_spell_t::calculate_result( s );
-
-    // TODO: Pyroclasm 2pc is likely scripted. Fuel the Fire does not see the increased crit chance.
-    if ( r == RESULT_HIT && pyroclasm_active() && p()->sets->has_set_bonus( MAGE_FIRE, MID2, B2 ) )
-      r = RESULT_CRIT;
-
-    return r;
   }
 
   double composite_da_multiplier( const action_state_t* s ) const override
@@ -4050,6 +4045,16 @@ struct frostbolt_t final : public frost_mage_spell_t
     return m;
   }
 
+  void do_schedule_travel( action_state_t* s, timespan_t time ) override
+  {
+    // TODO: Frostfire Bolt seems to always impact the cleave target first, which means
+    // FFE triggers on the weaker hit. While this doesn't model it perfectly (it doesn't
+    // work with distance targeting), it should be sufficient for most sims.
+    if ( frostfire && p()->bugs && s->chain_target == 0 )
+      time += 1_ms;
+    frost_mage_spell_t::do_schedule_travel( s, time );
+  }
+
   void execute() override
   {
     frost_mage_spell_t::execute();
@@ -5223,18 +5228,22 @@ struct arcane_echo_t final : public arcane_mage_spell_t
 
 struct frostfire_empowerment_t final : public spell_t
 {
+  // Counts the excluded main target towards the soft cap.
+  double reduced_aoe_targets_2;
   proc_t* freezing_source;
 
   frostfire_empowerment_t( std::string_view n, mage_t* p ) :
     spell_t( n, p, p->find_spell( 431186 ) ),
-    freezing_source( p->get_proc( "Freezing applied (Frostfire Empowerment)" ) )
+    freezing_source( p->get_proc( "Freezing applied (Frostfire Empowerment)" ) ),
+    reduced_aoe_targets_2( p->talents.frostfire_empowerment->effectN( 5 ).base_value() )
   {
     background = proc = true;
     target_filter_callback = secondary_targets_only();
     aoe = -1;
     base_dd_min = base_dd_max = 1.0;
-    // TODO: Check how it behaves wrt the excluded main target
-    reduced_aoe_targets = p->talents.frostfire_empowerment->effectN( 5 ).base_value();
+
+    if ( !p->bugs )
+      reduced_aoe_targets = reduced_aoe_targets_2;
   }
 
   void impact( action_state_t* s ) override
@@ -5244,6 +5253,30 @@ struct frostfire_empowerment_t final : public spell_t
     mage_t* p = debug_cast<mage_t*>( player );
     if ( result_is_hit( s->result ) )
       p->trigger_freezing( s->target, as<int>( p->talents.frostfire_empowerment->effectN( 4 ).base_value() ), freezing_source );
+  }
+
+  double composite_aoe_multiplier( const action_state_t* s ) const override
+  {
+    double m = spell_t::composite_aoe_multiplier( s );
+    if ( !player->bugs )
+      return m;
+
+    // FFE has a couple of weird quirks:
+    //  a) it hits dead targets which count towards the cap (not implemented here)
+    //  b) it somehow counts the excluded primary target towards the cap
+    //  c) it doesn't split damage past 20 targets
+    // There's no core support for these, so we have to reimplement that here.
+    // Consider moving this elsewhere if we find more spells that behave similarly.
+    assert( reduced_aoe_targets_2 > 0.0 );
+
+    int targets = s->n_targets + 1;
+    if ( as<double>( targets ) > reduced_aoe_targets_2 )
+      m *= std::sqrt( reduced_aoe_targets_2 / std::min( sim->max_aoe_enemies, targets ) );
+
+    if ( s->n_targets > static_cast<size_t>( sim->max_aoe_enemies ) )
+      m /= sim->max_aoe_enemies / static_cast<double>( s->n_targets );
+
+    return m;
   }
 };
 
@@ -6736,6 +6769,13 @@ double mage_t::composite_player_target_multiplier( player_t* target, school_e sc
       m *= 1.0 + totm->data().effectN( 2 ).percent();
   }
 
+  return m;
+}
+
+double mage_t::composite_versus_multiplier( player_t* target ) const
+{
+  double m = player_t::composite_versus_multiplier( target );
+
   // TODO: this still technically points to 458910's value (but the debuff is likely no longer used)
   if ( talents.molten_fury.ok() && target->health_percentage() <= talents.molten_fury->effectN( 1 ).base_value() )
     m *= 1.0 + talents.molten_fury->effectN( 2 ).percent();
@@ -7476,10 +7516,6 @@ private:
   mage_t& p;
 };
 
-namespace live_mage {
-#include "class_modules/sc_mage_live.inc"
-}
-
 // MAGE MODULE INTERFACE ====================================================
 
 struct mage_module_t final : public module_t
@@ -7491,19 +7527,9 @@ public:
 
   player_t* create_player( sim_t* sim, std::string_view name, race_e r = RACE_NONE ) const override
   {
-    // TODO: Remove version check and the live mage file
-    if ( sim->dbc->wowv() >= wowv_t{ 12, 1, 0 } )
-    {
-      auto p = new mage_t( sim, name, r );
-      p->report_extension = std::make_unique<mage_report_t>( *p );
-      return p;
-    }
-    else
-    {
-      auto p = new live_mage::mage_t( sim, name, r );
-      p->report_extension = std::make_unique<live_mage::mage_report_t>( *p );
-      return p;
-    }
+    auto p = new mage_t( sim, name, r );
+    p->report_extension = std::make_unique<mage_report_t>( *p );
+    return p;
   }
 
   void register_hotfixes() const override

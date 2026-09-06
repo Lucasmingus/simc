@@ -1849,6 +1849,7 @@ const char* util::scale_metric_type_string( scale_metric_e sm )
     case SCALE_METRIC_DEATHS:    return "Deaths";
     case SCALE_METRIC_TIME:      return "Fight Length";
     case SCALE_METRIC_RAID_DPS:  return "Raid Damage per Second";
+    case SCALE_METRIC_DHAPS:     return "Damage/Healing/Absorb per Second";
     default:                     return "Unknown";
   }
 }
@@ -1872,6 +1873,7 @@ const char* util::scale_metric_type_abbrev( scale_metric_e sm )
     case SCALE_METRIC_DEATHS:    return "deaths";
     case SCALE_METRIC_TIME:      return "time";
     case SCALE_METRIC_RAID_DPS:  return "raid_dps";
+    case SCALE_METRIC_DHAPS:     return "dhaps";
     default:                     return "unknown";
   }
 }
@@ -2604,7 +2606,7 @@ const char* util::retarget_event_string( retarget_source event )
     case retarget_source::ACTOR_INVULNERABLE: return "actor_invulnerable";
     case retarget_source::ACTOR_VULNERABLE: return "actor_vulnnerable";
     case retarget_source::SELF_ARISE: return "self_arise";
-    case retarget_source::SELF_RETARGET: return "self_arise";
+    case retarget_source::SELF_RETARGET: return "self_retarget";
     default: return "unknown";
   }
 }

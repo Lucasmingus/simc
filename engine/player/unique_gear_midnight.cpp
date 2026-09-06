@@ -75,29 +75,26 @@ using selector_fn = std::function<stat_e( const player_t*, util::span<const stat
 
 struct selector_food_buff_t : public consumable_buff_t<stat_buff_t>
 {
-
-  double amount;
   bool highest;
 
   selector_food_buff_t( const special_effect_t& e, bool b )
     : consumable_buff_t( e.player, e.name(), e.driver() ), highest( b )
   {
-    amount = e.stat_amount;
+    add_stat( secondary_ratings[ 0 ], e.stat_amount );
+
+    set_chance( 1.0 );
   }
 
   void start( int s, double v, timespan_t d ) override
   {
-    auto stat = highest ? util::highest_stat( player, secondary_ratings )
-                        : util::lowest_stat( player, secondary_ratings );
-
-    if( !manual_stats_added )
-      add_stat( stat, amount );
+    stats.front().stat =
+      highest ? util::highest_stat( player, secondary_ratings ) : util::lowest_stat( player, secondary_ratings );
 
     consumable_buff_t::start( s, v, d );
   }
 };
 
-custom_cb_t selector_food( unsigned id, bool highest, bool major = true )
+custom_cb_t selector_food( unsigned id, bool highest, double script_coefficient = 1.0, bool major = true )
 {
   return [ = ]( special_effect_t& effect ) {
     effect.spell_id = id;
@@ -108,60 +105,63 @@ custom_cb_t selector_food( unsigned id, bool highest, bool major = true )
     if ( !major )
       effect.stat_amount *= coeff->effectN( 1 ).base_value() * 0.1;
 
+    effect.stat_amount *= script_coefficient;
+
     effect.custom_buff = new selector_food_buff_t( effect, highest );
   };
 }
 
-custom_cb_t primary_food( unsigned id, stat_e stat, size_t primary_idx = 3, bool major = true )
+custom_cb_t primary_food( unsigned id, stat_e stat, size_t primary_idx = 3, double script_coefficient = 1.0, bool major = true )
 {
   return [ = ]( special_effect_t& effect ) {
     effect.spell_id = id;
 
     auto coeff = effect.player->find_spell( food_coeff_spell_id );
 
-    auto buff = create_buff<consumable_buff_t<stat_buff_t>>( effect.player, effect.driver() );
+    auto buff = create_buff<consumable_buff_t<stat_buff_t>>( effect.player, effect.name(), effect.driver() );
+    buff->set_chance( 1.0 );
+
+    double coefficient = 1.0;
+    coefficient *= script_coefficient;
+    if ( !major )
+      coefficient *= coeff->effectN( 1 ).base_value() * 0.1;
 
     if ( primary_idx )
     {
       auto _amt = coeff->effectN( primary_idx ).average( effect );
-      if ( !major )
-        _amt *= coeff->effectN( 1 ).base_value() * 0.1;
-
-      buff->add_stat( effect.player->convert_hybrid_stat( stat ), _amt );
+      buff->add_stat( effect.player->convert_hybrid_stat( stat ), _amt * coefficient );
     }
 
     if ( primary_idx == 3 )
     {
       auto _amt = coeff->effectN( 8 ).average( effect );
-      if ( !major )
-        _amt *= coeff->effectN( 1 ).base_value() * 0.1;
-
-      buff->add_stat( STAT_STAMINA, _amt );
+      buff->add_stat( STAT_STAMINA, _amt * coefficient );
     }
 
     effect.custom_buff = buff;
   };
 }
 
-custom_cb_t secondary_food( unsigned id, stat_e stat1, stat_e stat2 = STAT_NONE )
+custom_cb_t secondary_food( unsigned id, stat_e stat1, stat_e stat2 = STAT_NONE, double script_coefficient = 1.0 )
 {
   return [ = ]( special_effect_t& effect ) {
     effect.spell_id = id;
 
     auto coeff = effect.player->find_spell( food_coeff_spell_id );
 
-    auto buff = create_buff<consumable_buff_t<stat_buff_t>>( effect.player, effect.driver() );
+    auto buff = create_buff<consumable_buff_t<stat_buff_t>>( effect.player, effect.name(), effect.driver() );
+    buff->set_chance( 1.0 );
 
     if ( stat2 == STAT_NONE )
     {
       auto _amt = coeff->effectN( 4 ).average( effect );
-      buff->add_stat( stat1, _amt );
+      buff->add_stat( stat1, _amt * script_coefficient );
     }
     else
     {
       auto _amt = coeff->effectN( 5 ).average( effect );
-      buff->add_stat( stat1, _amt );
-      buff->add_stat( stat2, _amt );
+      buff->add_stat( stat1, _amt * script_coefficient );
+      buff->add_stat( stat2, _amt * script_coefficient );
     }
 
     effect.custom_buff = buff;
@@ -229,9 +229,13 @@ void potion_of_zealotry( special_effect_t& effect )
   {
     const special_effect_t& effect;
     player_t* last_target;
+    double mul;
 
     burst_of_zealotry_t( const special_effect_t& e )
-      : generic_proc_t( e, "burst_of_zealotry", 1237158 ), effect( e ), last_target( nullptr )
+      : generic_proc_t( e, "burst_of_zealotry", 1237158 ),
+        effect( e ),
+        last_target( nullptr ),
+        mul( e.driver()->effectN( 4 ).percent() )
     {
       base_dd_min = base_dd_max = e.driver()->effectN( 3 ).average( e );
       target_debuff             = e.driver()->effectN( 1 ).trigger();
@@ -242,7 +246,7 @@ void potion_of_zealotry( special_effect_t& effect )
       double m = generic_proc_t::composite_da_multiplier( s );
 
       if ( auto debuff = find_debuff( s->target ) )
-        m *= 1.0 + debuff->check() * effect.driver()->effectN( 4 ).percent();
+        m *= 1.0 + debuff->check() * mul;
 
       return m;
     }
@@ -267,7 +271,7 @@ void potion_of_zealotry( special_effect_t& effect )
 
   auto burst_of_zealotry            = new special_effect_t( effect.player );
   burst_of_zealotry->name_str       = "burst_of_zealotry_proc";
-  burst_of_zealotry->spell_id       = effect.driver()->id();
+  burst_of_zealotry->spell_id       = effect.spell_id;
   burst_of_zealotry->cooldown_      = 0_ms; // Cooldown handled by the main special effect
   burst_of_zealotry->execute_action = create_proc_action<burst_of_zealotry_t>( "burst_of_zealotry", effect );
   effect.player->special_effects.push_back( burst_of_zealotry );
@@ -282,13 +286,85 @@ void potion_of_zealotry( special_effect_t& effect )
 // 1295147 buff
 void liquid_luster( special_effect_t& effect )
 {
-  if ( unique_gear::create_fallback_buffs( effect, { "lustrous_gleam" } ) )
+  if ( unique_gear::create_fallback_buffs( effect, { "liquid_luster", "lustrous_gleam" } ) )
     return;
 
-  effect.custom_buff = create_buff<stat_buff_t>( effect.player, "lustrous_gleam", effect.trigger(), effect.item )
-                           ->add_stat_from_effect_type( A_MOD_RATING, effect.driver()->effectN( 1 ).average( effect ) )
-                           ->set_period( effect.driver()->effectN( 1 ).period() );
+  struct liquid_luster_buff_t : public buff_t
+  {
+    stat_buff_t* gleam;
+    timespan_t gleam_period;
+
+    liquid_luster_buff_t( player_t* p, std::string_view n, const special_effect_t& e )
+      : buff_t( p, n, e.driver() ), gleam_period( e.driver()->effectN( 1 ).period() )
+    {
+      // ticks are scripted to allow for precombat usage
+      set_period( 0_ms );
+      set_refresh_behavior( buff_refresh_behavior::DURATION );
+
+      gleam = create_buff<stat_buff_t>( player, e.trigger() )
+        ->add_stat_from_effect_type( A_MOD_RATING, e.driver()->effectN( 1 ).average( e ) );
+    }
+
+    void _tick()
+    {
+      gleam->trigger( remains() );
+    }
+
+    bool trigger( int s, double v, double c, timespan_t d ) override
+    {
+      // partial duration should only happen during precombat
+      assert( !player->in_combat || d == timespan_t::min() || d == buff_duration() );
+
+      auto ret = buff_t::trigger( s, v, c, d );
+      if ( ret )
+      {
+        d = remains();
+
+        // starts out with one stack on potion use
+        int _initial_stack = static_cast<int>( ( buff_duration() - d ) / gleam_period ) + 1;
+        gleam->trigger( _initial_stack, d );
+
+        // determine how many full ticks are left
+        int _full_ticks = static_cast<int>( d / gleam_period );
+        if ( !_full_ticks )
+          return ret;
+
+        // determine how long the current partial tick (if any) will take
+        timespan_t _partial_tick = d - gleam_period * _full_ticks;
+
+        // final tick happens on expiration so we don't need to schedule it
+        _full_ticks--;
+
+        if ( _partial_tick > 0_ms )
+        {
+          if ( _full_ticks )
+          {
+            // trigger the partial then the remaining ticks
+            make_event( *sim, _partial_tick, [ this, _full_ticks ] {
+              _tick();
+              make_repeating_event( *sim, gleam_period, [ this ] { _tick(); }, _full_ticks );
+            } );
+          }
+          else
+          {
+            // trigger the partial only
+            make_event( *sim, _partial_tick, [ this ] { gleam->trigger( remains() ); } );
+          }
+
+          return ret;
+        }
+
+        if ( _full_ticks )
+          make_repeating_event( *sim, gleam_period, [ this ] { _tick(); }, _full_ticks );
+      }
+
+      return ret;
+    }
+  };
+
+  effect.custom_buff = create_buff<liquid_luster_buff_t>( effect.player, "liquid_luster", effect );
 }
+
 // Alluring Nostrum
 // 1295015 Driver & buff
 // 1295019 damage
@@ -317,7 +393,7 @@ void alluring_nostrum( special_effect_t& effect )
 
   auto voidlash_salvo            = new special_effect_t( effect.player );
   voidlash_salvo->name_str       = "voidlash_salvo_proc";
-  voidlash_salvo->spell_id       = effect.driver()->id();
+  voidlash_salvo->spell_id       = effect.spell_id;
   voidlash_salvo->cooldown_      = 0_ms;  // Cooldown handled by the main special effect
   voidlash_salvo->execute_action = create_proc_action<voidlash_salvo_t>( "voidlash_salvo", effect, debuff );
   effect.player->special_effects.push_back( voidlash_salvo );
@@ -374,8 +450,11 @@ void weighted_boomshots( special_effect_t& effect )
   // assumed to not split so use generic_proc_t and just set aoe = -1;
   auto aoe = create_proc_action<generic_proc_t>( "weighted_boomshots", effect, missile->data().effectN( 1 ).trigger() );
   aoe->aoe = -1;
-  missile->stats = aoe->stats;  // just report the damage
+
+  missile->dual = true;
   missile->impact_action = aoe;
+  missile->stats = aoe->stats;  // just report the damage
+  aoe->stats->action_list.push_back( missile );
 
   effect.execute_action = missile;
 
@@ -526,6 +605,66 @@ void farstriders_hawkeye( special_effect_t& effect )
 
   new dbc_proc_callback_t( effect.player, effect );
 }
+
+// Rite of the Hash'ey
+// 1297651 Rank 1 Driver
+// 1297652 Rank 2 Driver
+// 1297654 RPPM
+// 1297655 Jan'alai's Rite (Haste)
+// 1297663 Halazzi's Rite (Crit)
+// 1297664 Akil'zon's Rite (Mastery)
+// 1297665 Nalorakk's Rite (Vers)
+// The proc always grants the highest secondary stat, so "favors"
+// is implemented as a guarantee while above the health threshold.
+void rite_of_the_hashey( special_effect_t& effect )
+{
+  struct rite_of_the_hashey_cb_t final : public dbc_proc_callback_t
+  {
+    std::unordered_map<stat_e, buff_t*> rites;
+
+    rite_of_the_hashey_cb_t( const special_effect_t& e, std::unordered_map<stat_e, buff_t*> b )
+      : dbc_proc_callback_t( e.player, e ), rites( std::move( b ) )
+    {}
+
+    void execute( const spell_data_t*, player_t*, action_state_t* ) override
+    {
+      // Currently this always triggers a Crit buff on every single trigger. This will have 0 stats on it unless it
+      // rolls crit. We can simulate this behaviour by expiring the crit buff with every trigger.
+      rites[ STAT_CRIT_RATING ]->expire();
+
+      // The enchant favors the highest secondary stat while above 80% health. Instead of tracking
+      // health, roll against the configured uptime for how often that condition is met.
+      auto stat = rng().roll( listener->midnight_opts.rite_of_the_hashey_uptime )
+                    ? util::highest_stat( listener, secondary_ratings )
+                    : secondary_ratings[ rng().range( secondary_ratings.size() ) ];
+
+      rites[ stat ]->trigger();
+    }
+  };
+
+  auto proc_value = effect.driver()->effectN( 1 ).average( effect );
+
+  std::unordered_map<stat_e, buff_t*> rites;
+
+  for ( unsigned id : { 1297655u, 1297663u, 1297664u, 1297665u } )
+  {
+    auto rite_data = effect.player->find_spell( id );
+
+    assert( rite_data->effectN( 1 ).subtype() == A_MOD_RATING );
+
+    rites[ util::translate_rating_mod( rite_data->effectN( 1 ).misc_value1() ) ] =
+      create_buff<stat_buff_t>( effect.player, rite_data )
+        ->add_stat_from_effect_type( A_MOD_RATING, proc_value );
+  }
+
+  // skip setup if callback has been created by already having another copy of the enchant
+  if ( find_special_effect( effect.player, effect.trigger()->id() ) )
+    return;
+
+  effect.spell_id = effect.trigger()->id();
+
+  new rite_of_the_hashey_cb_t( effect, std::move( rites ) );
+}
 }  // namespace enchants
 
 namespace embellishments
@@ -650,7 +789,8 @@ void devouring_banding( special_effect_t& effect )
       dual = true;
 
       impact_action = create_proc_action<generic_proc_t>( "devouring_bolt", e, data().effectN( 1 ).trigger() );
-      stats         = impact_action->stats;  // report the damage only
+      stats = impact_action->stats;  // report the damage only
+      impact_action->stats->action_list.push_back( this );
     }
   };
 
@@ -1151,7 +1291,7 @@ void snakeskin_lining( special_effect_t& effect )
   aoe_damage->base_multiplier *= role_mult( effect );
 
   dot_damage->add_child( aoe_damage );
-  
+
   struct snakeskin_lining_cb_t final : public dbc_proc_callback_t
   {
     action_t* dot_action;
@@ -1275,7 +1415,7 @@ void hunters_ritual_stone( special_effect_t& effect )
     {
     }
 
-    void execute( const spell_data_t*, player_t* t, action_state_t* s ) override
+    void execute( const spell_data_t*, player_t*, action_state_t* ) override
     {
       rng().range( buffs )->trigger();
     }
@@ -1778,7 +1918,7 @@ void sapling_of_the_dawnroot( special_effect_t& effect )
     {
       parent_action = parent;
       main_hand_weapon.type = WEAPON_BEAST;
-      main_hand_weapon.swing_time = 2_s;
+      main_hand_weapon.swing_time = 1500_ms;
       use_auto_attack = true;
     }
 
@@ -1799,6 +1939,11 @@ void sapling_of_the_dawnroot( special_effect_t& effect )
     {
       unique_gear_pet_t::create_actions();
       sappy_demise = new sappy_demise_t( effect, "sappy_demise", this, find_spell( 1263121 ), parent_action );
+    }
+
+    double composite_melee_auto_attack_speed() const override
+    {
+      return 1.0;
     }
 
   private:
@@ -2325,8 +2470,7 @@ void void_execution_mandate( special_effect_t& effect )
   };
 
   auto crit_buff = create_buff<stat_buff_t>( effect.player, effect.player->find_spell( 1263357 ) )
-                     ->set_stat_from_effect_type( A_MOD_RATING, effect.driver()->effectN( 2 ).average( effect ) )
-                     ->set_refresh_behavior( buff_refresh_behavior::DISABLED );
+                     ->set_stat_from_effect_type( A_MOD_RATING, effect.driver()->effectN( 2 ).average( effect ) );
 
   auto haste_buff = create_buff<stat_buff_t>( effect.player, effect.driver() )
                       ->set_stat_from_effect_type( A_MOD_RATING, effect.driver()->effectN( 3 ).average( effect ) )
@@ -2341,7 +2485,7 @@ void void_execution_mandate( special_effect_t& effect )
   auto impending          = new special_effect_t( effect.player );
   impending->name_str     = "impending_execution_proc";
   impending->item         = effect.item;
-  impending->spell_id     = effect.driver()->id();
+  impending->spell_id     = effect.spell_id;
   impending->cooldown_    = 0_ms; // Cooldown is for on use effect, not the equip effect.
   impending->proc_flags2_ = PF2_ALL_HIT;
   effect.player->special_effects.push_back( impending );
@@ -2349,7 +2493,7 @@ void void_execution_mandate( special_effect_t& effect )
   new dbc_proc_callback_t( effect.player, *impending );
 
   effect.player->callbacks.register_callback_execute_function(
-    effect.driver()->id(), [ debuff, crit_buff ]( auto, auto, player_t* t, auto ) {
+    effect.spell_id, [ debuff, crit_buff ]( auto, auto, player_t* t, auto ) {
       if ( debuff->get_debuff( t )->check() )
         crit_buff->trigger();
     } );
@@ -2989,6 +3133,19 @@ void astalors_anguish_agitator( special_effect_t& e )
   e.custom_buff    = leech_buff;
 }
 
+// 1247568 crit driver
+// 1247569 haste driver
+// 1247570 mastery driver
+// 1247571 versatility driver
+void drum_of_renewed_bonds( special_effect_t& effect )
+{
+  auto buff_name = fmt::format( "{}_{}", effect.trigger()->name_cstr(), "renewed_bonds" );
+  effect.custom_buff = create_buff<stat_buff_t>( effect.player, buff_name, effect.trigger() )
+    ->set_name_reporting( "Renewed Bonds" );
+
+  new dbc_proc_callback_t( effect.player, effect );
+}
+
 // 1253120 Driver
 // 1266300 Ally Buff
 // 1266299 Player Buff
@@ -2998,10 +3155,19 @@ void glorious_crusaders_keepsake( special_effect_t& e )
   {
     target_specific_t<std::unordered_map<stat_e, buff_t*>> buffs;
     std::unordered_map<size_t, bool> valid_party_targets;
-
+    const spell_data_t* player_buff;
+    const spell_data_t* ally_buff;
+    double player_value;
+    double ally_value;
 
     glorious_crusaders_keepsake_cb_t( const special_effect_t& e )
-      : dbc_proc_callback_t( e.player, e ), buffs{ true }, valid_party_targets()
+      : dbc_proc_callback_t( e.player, e ),
+        buffs{ true },
+        valid_party_targets(),
+        player_buff( e.player->find_spell( 1266299 ) ),
+        ally_buff( e.player->find_spell( 1266300 ) ),
+        player_value( e.driver()->effectN( 1 ).average( e ) ),
+        ally_value( e.driver()->effectN( 2 ).average( e ) )
     {
       create_buffs( effect.player );
     }
@@ -3047,15 +3213,14 @@ void glorious_crusaders_keepsake( special_effect_t& e )
       if ( buffs[ target_player ] )
         return;
 
-      auto buff_spell =
-          effect.player == target_player ? effect.player->find_spell( 1266299 ) : effect.player->find_spell( 1266300 );
-
-      auto buff_size = effect.driver()->effectN( effect.player == target_player ? 1 : 2 ).average( effect );
+      auto buff_spell = effect.player == target_player ? player_buff : ally_buff;
+      auto buff_value = effect.player == target_player ? player_value : ally_value;
 
       buffs[ target_player ] = new std::unordered_map<stat_e, buff_t*>();
 
-      create_all_buffs( target_player, effect, buff_spell, buff_size,
-                        [ & ]( stat_e s, buff_t* b ) { ( *buffs[ target_player ] )[ s ] = b; } );
+      create_all_buffs( target_player, effect, buff_spell, buff_value, [ & ]( stat_e s, buff_t* b ) {
+        ( *buffs[ target_player ] )[ s ] = b;
+      } );
     }
 
     bool valid_player( player_t* target_player )
@@ -3581,6 +3746,8 @@ void voracious_heart_of_ulatek( special_effect_t& effect )
       : generic_proc_t( e, "devour_morsel", e.player->find_spell( 1305374 ) ), buff( buff )
     {
       base_dd_min = base_dd_max = equip->effectN( 2 ).average( e );
+      // role mult not found in spell description
+      base_multiplier *= role_mult( e.player );
     }
 
     void execute() override
@@ -3594,8 +3761,8 @@ void voracious_heart_of_ulatek( special_effect_t& effect )
   auto damage = create_proc_action<devour_morsel_t>( "devour_morsel", effect, equip, stacking );
 
   auto equip_se = new special_effect_t( effect.player );
-  equip_se->name_str = "voracious_heart_of_ulatek_driver";
-  equip_se->spell_id = effect.driver()->id();
+  equip_se->name_str = "voracious_heart_of_ulatek_equip_driver";
+  equip_se->spell_id = effect.spell_id;
   equip_se->execute_action = damage;
   equip_se->proc_flags2_   = PF2_ALL_HIT;  // TODO: confirm
   equip_se->cooldown_      = 0_ms;
@@ -3612,13 +3779,12 @@ void voracious_heart_of_ulatek( special_effect_t& effect )
 // 1307222 Venom Splatter
 void font_of_venomous_rage( special_effect_t& effect )
 {
-
   struct font_channel_t : public proc_spell_t
   {
     action_t* venom_splatter;
 
     font_channel_t( const special_effect_t& e ) :
-      proc_spell_t( "font_of_venemous_rage", e.player, e.driver() )
+      proc_spell_t( "font_of_venomous_rage", e.player, e.driver() )
     {
       unsigned equip_id = 1297911;
       auto equip = find_special_effect( e.player, equip_id );
@@ -3628,11 +3794,14 @@ void font_of_venomous_rage( special_effect_t& effect )
 
       unsigned num_ticks = as<unsigned>( dot_duration / base_tick_time ) + tick_on_application;
 
-      base_td = equip->driver()->effectN( 1 ).average( e ) / num_ticks;
+      // base_td assumes 4 ticks; revert change if blizzard fixes trinket's tooltip/spell data
+      base_td = equip->driver()->effectN( 1 ).average( e ) / ( num_ticks - 1 );
       base_td_multiplier *= role_mult( e );
 
       venom_splatter = create_proc_action<generic_aoe_proc_t>( "venom_splatter", e, e.player->find_spell( 1307222 ), false );
-      venom_splatter->base_dd_min = venom_splatter->base_dd_max = equip->driver()->effectN( 2 ).average( e ) / num_ticks;
+
+      // base_td assumes 4 ticks; revert change if blizzard fixes trinket's tooltip/spell data
+      venom_splatter->base_dd_min = venom_splatter->base_dd_max = equip->driver()->effectN( 2 ).average( e ) / ( num_ticks - 1 );
       venom_splatter->base_multiplier *= role_mult( e );
       venom_splatter->dual = true;
       venom_splatter->target_filter_callback = secondary_targets_only();
@@ -3663,7 +3832,7 @@ void font_of_venomous_rage( special_effect_t& effect )
     }
   };
 
-  effect.execute_action = create_proc_action<font_channel_t>( "font_of_venemous_rage", effect );
+  effect.execute_action = create_proc_action<font_channel_t>( "font_of_venomous_rage", effect );
 }
 
 // Stormbound Emblem of Dazar
@@ -3734,32 +3903,25 @@ void keepers_seething_core( special_effect_t& effect )
   struct focus_of_ulatek_t : public stat_buff_t
   {
     double mult;
+
     focus_of_ulatek_t( player_t* p, std::string_view name, const special_effect_t& e )
-      : stat_buff_t( p, name, e.trigger() ), mult( 0 )
+      : stat_buff_t( p, name, e.trigger() ), mult( e.driver()->effectN( 2 ).percent() )
     {
       set_stat_from_effect_type( A_MOD_RATING, e.driver()->effectN( 1 ).average( e ) );
       set_default_value( e.driver()->effectN( 1 ).average( e ) );
       add_invalidate( CACHE_HASTE );
       disable_ticking( true );
-      mult = e.driver()->effectN( 2 ).percent();
     }
 
-    double calc_stat_val()
+    double buff_stat_stack_amount( const buff_stat_t& stat, int s ) const override
     {
-      double value = default_value;
+      auto _amount = stat_buff_t::buff_stat_stack_amount( stat, s );
 
       // Stack requirement not in data. basing implementation off tooltip text.
-      if ( check() >= 2 )
-        value *= 1.0 + mult;
+      if ( s >= 2 )
+        _amount *= 1.0 + mult;
 
-      return value;
-    }
-
-    void bump( int s, double v ) override
-    {
-      for ( auto& s : stats )
-        s.amount = calc_stat_val();
-      stat_buff_t::bump( s, v );
+      return _amount;
     }
   };
 
@@ -3825,7 +3987,7 @@ void hex_lords_dooming_idol( special_effect_t& effect )
   effect.execute_action =
       create_proc_action<hex_lords_dooming_idol_t>( "hex_lords_dooming_idol", effect, doom, use_buff );
 }
-  
+
 // Vashnik's Sanguine Rancor
 // 1295553 Driver
 // 1303479 Sanguine Rancor (stack buff)
@@ -3998,7 +4160,17 @@ void permafrost_essence( special_effect_t& effect )
     {
       mark_of_frost->trigger();
 
-      if ( t->health_percentage() <= effect.driver()->effectN( 2 ).base_value() )
+      bool fire_shield;
+      if ( listener->midnight_opts.permafrost_essence_use_health_threshold )
+      {
+        fire_shield = t->health_percentage() <= effect.driver()->effectN( 2 ).base_value();
+      }
+      else
+      {
+        fire_shield = rng().roll( listener->midnight_opts.permafrost_essence_shield_proc_chance );
+      }
+
+      if ( fire_shield )
       {
         double amount = effect.driver()->effectN( 3 ).average( effect ) * mark_of_frost->check();
         mark_of_frost->expire();
@@ -4069,6 +4241,18 @@ void tattered_amani_war_banner( special_effect_t& effect )
       extend_dur = timespan_t::from_seconds( driver->effectN( 2 ).base_value() );
       // Player option should probably be related to this. change the duration based off a gaussian distribution?
       set_duration( driver->duration() );
+    }
+
+    void expire_override( int s, timespan_t d ) override
+    {
+      stat_buff_t::expire_override( s, d );
+      extended = false;
+    }
+
+    void reset() override
+    {
+      stat_buff_t::reset();
+      extended = false;
     }
 
     void extend_battle_fervor()
@@ -4158,6 +4342,384 @@ void sethraliss_defiled_relic( special_effect_t& effect )
   effect.custom_buff    = buff;
   effect.execute_action = dot;
 }
+
+// 1291885 effect driver
+// 1291894 use driver
+// 1307599 aura trigger
+// 1307578 absorb
+void soulcoiler_ritual_vessel( special_effect_t& effect )
+{
+  struct fractional_absorb_t : public absorb_buff_t
+  {
+    double absorb_fraction;
+
+    fractional_absorb_t( actor_pair_t q, std::string_view name, const spell_data_t* spell,
+                         const item_t* item = nullptr )
+      : absorb_buff_t( q, name, spell, item ), absorb_fraction( 1.0 )
+    {
+    }
+
+    fractional_absorb_t( player_t* target, player_t* source, std::string_view name, const spell_data_t* spell,
+                         const item_t* item = nullptr )
+      : fractional_absorb_t( { target, source }, name, spell, item )
+    {
+    }
+
+    double consume( double amount, action_state_t* state = nullptr ) override
+    {
+      return absorb_buff_t::consume( amount * absorb_fraction, state );
+    }
+
+    absorb_buff_t* set_absorb_fraction( double fraction )
+    {
+      absorb_fraction = fraction;
+      return this;
+    }
+  };
+
+  struct soulcoiler_ritual_vessel_t : public proc_heal_t
+  {
+    target_specific_t<absorb_buff_t> absorb_buffs;
+    const spell_data_t* absorb_spell;
+    double absorb_amount;
+    mutable target_cache_t absorb_target_cache;
+
+    soulcoiler_ritual_vessel_t( const special_effect_t& effect, const spell_data_t* absorb_spell )
+      : proc_heal_t( "soulcoiler_ritual_vessel", effect.player, effect.driver() ),
+        absorb_buffs{ false },
+        absorb_spell( absorb_spell ),
+        absorb_amount( 0 ),
+        absorb_target_cache()
+    {
+      auto equip = find_special_effect( effect.player, 1291885 );
+      assert( equip && "Soulcoiler Ritual Vessel missing equip effect" );
+
+      absorb_amount = equip->driver()->effectN( 1 ).average( effect.item );
+      absorb_amount *= role_mult( effect );
+
+      channeled = tick_zero = true;
+      harmful   = false;
+
+      target = player;
+    }
+
+    absorb_buff_t* get_buff( player_t* t )
+    {
+      if ( absorb_buffs[ t ] )
+        return absorb_buffs[ t ];
+
+      auto buff = make_buff<fractional_absorb_t>( t, player, "soulcoil_barrier", absorb_spell )
+                      ->set_absorb_fraction( absorb_spell->effectN( 2 ).percent() )
+                      ->set_absorb_source( player->get_stats( "soulcoiler_ritual_vessel", this ) );
+
+      absorb_buffs[ t ] = buff;
+
+      return buff;
+    }
+
+    void reset() override
+    {
+      proc_heal_t::reset();
+      absorb_target_cache.is_valid = false;
+    }
+
+    void activate() override
+    {
+      proc_heal_t::activate();
+
+      sim->healing_no_pet_list.register_callback( [ this ]( player_t* ) { absorb_target_cache.is_valid = false; } );
+    }
+
+    size_t absorb_available_targets( std::vector<player_t*>& target_list ) const
+    {
+      target_list.clear();
+
+      for ( const auto& t : sim->healing_no_pet_list )
+      {
+        if ( !t->is_sleeping() )
+          target_list.push_back( t );
+      }
+
+      return target_list.size();
+    }
+
+    std::vector<player_t*>& absorb_target_list() const
+    {
+      if ( !absorb_target_cache.is_valid )
+      {
+        absorb_available_targets( absorb_target_cache.list );
+        absorb_target_cache.is_valid = true;
+      }
+
+      return absorb_target_cache.list;
+    }
+
+    void execute() override
+    {
+      proc_heal_t::execute();
+
+      // cancel the player-ready event triggered by use_item_t
+      event_t::cancel( player->readying );
+
+      // prevent auto attacks while channeling
+      player->reset_auto_attacks( composite_dot_duration( execute_state ) );
+    }
+
+    void tick( dot_t* d ) override
+    {
+      proc_heal_t::tick( d );
+
+      auto& tl = absorb_target_list();
+
+      if ( tl.size() > 0 )
+      {
+        rng().shuffle( tl.begin(), tl.end() );
+
+        auto target = tl.begin();
+        while ( next( target ) < tl.end() && get_buff( *target )->check() )
+        {
+          target = next( target );
+        }
+
+        get_buff( *target )->trigger( -1, absorb_amount );
+      }
+    }
+
+    void last_tick( dot_t* d ) override
+    {
+      // cache first since last_tick() will null out player->channeling
+      bool was_channeling = player->channeling == this;
+
+      proc_heal_t::last_tick( d );
+
+      // restart the player since the player-ready from use_item_t was canceled
+      if ( was_channeling && !player->readying )
+        player->schedule_ready( rng().gauss( sim->channel_lag ) );
+    }
+  };
+
+  effect.execute_action = create_proc_action<soulcoiler_ritual_vessel_t>( "soulcoiler_ritual_vessel", effect,
+                                                                          effect.player->find_spell( 1307578 ) );
+}
+
+// 1306743 use driver
+// 1296883 equip driver
+// 1294327 use damage
+// 1296888 repeat damage
+// 1296890 repeat buff
+// 1306744 repeat driver
+void ophidian_bone_whistle( special_effect_t& effect )
+{
+  struct ophidian_bone_whistle_t : public generic_proc_t
+  {
+    action_t* damage;
+    action_t* repeat;
+    buff_t* buff;
+    timespan_t damage_delay;
+    timespan_t repeat_delay;
+
+    ophidian_bone_whistle_t( const special_effect_t& e ) : generic_proc_t( e, "ophidian_bone_whistle", e.driver() )
+    {
+      unsigned equip_id = 1296883;
+      auto equip = find_special_effect( e.player, equip_id );
+      assert( equip && "Ophidian Bone Whistle missing equip effect" );
+
+      // setup on-use damage
+      damage = create_proc_action<generic_aoe_proc_t>( "ophidian_bone_whistle_damage", e, e.trigger() );
+      damage->base_dd_min = damage->base_dd_max = equip->driver()->effectN( 1 ).average( e );
+      damage->base_multiplier *= role_mult( e );
+      damage->base_execute_time = timespan_t::from_millis( e.driver()->effectN( 1 ).misc_value1() );
+      damage->dual = true;
+      damage->stats = stats;
+
+      damage_delay = timespan_t::from_millis( e.driver()->effectN( 1 ).misc_value1() );
+
+      // setup repeat damage
+      auto s_repeat_buff = e.player->find_spell( 1296890 );
+      auto s_repeat_driver = s_repeat_buff->effectN( 1 ).trigger();
+      auto s_repeat = s_repeat_driver->effectN( 1 ).trigger();
+
+      repeat = create_proc_action<generic_aoe_proc_t>( "ophidian_bone_whistle_repeat", e, s_repeat );
+      repeat->base_dd_min = repeat->base_dd_max = equip->driver()->effectN( 1 ).average( e );
+      repeat->base_multiplier *= role_mult( e.player, s_repeat_buff );
+      repeat->base_execute_time = timespan_t::from_millis( s_repeat_driver->effectN( 1 ).misc_value1() );
+      repeat->name_str_reporting = "Repeat";
+      add_child( repeat );
+
+      repeat_delay = timespan_t::from_millis( s_repeat_driver->effectN( 1 ).misc_value1() );
+
+      // setup repeat buff + cb
+      buff = create_buff<buff_t>( e.player, s_repeat_buff );
+
+      auto repeat_eff = new special_effect_t( e.player );
+      repeat_eff->name_str = "ophidian_bone_whistle_repeat";
+      repeat_eff->spell_id = s_repeat_buff->id();
+      repeat_eff->execute_action = repeat;
+      e.player->special_effects.push_back( repeat_eff );
+
+      auto repeat_cb = new dbc_proc_callback_t( e.player, *repeat_eff );
+      repeat_cb->activate_with_buff( buff );
+
+      // proc is guaranteed on next spell, so we can use register_callback_trigger_function to expire the buff
+      e.player->callbacks.register_callback_trigger_function(
+        repeat_eff->spell_id, dbc_proc_callback_t::trigger_fn_type::CONDITION,
+        [ this ]( dbc_proc_callback_t* cb, const auto&, auto, auto, auto ) {
+          assert( cb->proc_chance >= 1.0 && buff->check() );
+          buff->expire();
+          return true;
+        } );
+
+      // TODO: is this cast at the target's location? does this need to be set up as ground_aoe?
+      e.player->callbacks.register_callback_execute_function(
+        repeat_eff->spell_id, [ this ]( auto, auto, player_t* t, auto ) {
+          assert( !buff->check() );
+          repeat->set_target( t );
+          make_event( *sim, repeat_delay, [ this ] { repeat->execute(); } );
+        } );
+    }
+
+    void execute() override
+    {
+      generic_proc_t::execute();
+
+      damage->set_target( target );
+      make_event( *sim, damage_delay, [ this ] { damage->execute(); } );
+
+      assert( cooldown && cooldown->down() );
+      make_event( *sim, cooldown->remains(), [ this ] { buff->trigger(); } );
+    }
+  };
+
+  effect.execute_action = create_proc_action<ophidian_bone_whistle_t>( "ophidian_bone_whistle", effect );
+}
+
+// Sszorak's Ferocity
+// 1295617 driver (e1: ravage, e2: mutilate, e3: tempest total, e4: killer instincts icd)
+// 1307332 Ravage (single target damage)
+// 1307333 Mutilate (frontal cone damage)
+// 1307324 Tempest (aoe dot)
+// 1307356 killing blow driver
+// 1307361 Killer Instincts buff
+void sszoraks_ferocity( special_effect_t& effect )
+{
+  auto ravage = create_proc_action<generic_proc_t>( "sszoraks_ravage", effect, 1307332 );
+  ravage->base_dd_min = ravage->base_dd_max = effect.driver()->effectN( 1 ).average( effect );
+  ravage->base_multiplier *= role_mult( effect );
+  ravage->name_str_reporting = "Ravage";
+
+  auto mutilate = create_proc_action<generic_aoe_proc_t>( "sszoraks_mutilate", effect, 1307333 );
+  mutilate->base_dd_min = mutilate->base_dd_max = effect.driver()->effectN( 2 ).average( effect );
+  mutilate->base_multiplier *= role_mult( effect );
+  mutilate->name_str_reporting = "Mutilate";
+
+  // no aoe scaling, unlike mutilate
+  auto tempest = create_proc_action<generic_aoe_proc_t>( "sszoraks_tempest", effect, 1307324, false );
+  auto tempest_ticks = as<unsigned>( tempest->dot_duration / tempest->base_tick_time ) + tempest->tick_on_application;
+  tempest->base_td = effect.driver()->effectN( 3 ).average( effect ) / tempest_ticks;
+  tempest->base_td_multiplier *= role_mult( effect );
+  tempest->split_aoe_damage = false;
+  tempest->name_str_reporting = "Tempest";
+
+  // in-game testing shows ravage on 1 target, mutilate on 2-5 and tempest on 6+
+  auto follow_up = [ ravage, mutilate, tempest ]( player_t* target ) {
+    auto targets = ravage->sim->target_non_sleeping_list.size();
+    if ( targets <= 1 )
+      ravage->execute_on_target( target );
+    else if ( targets <= 5 )
+      mutilate->execute_on_target( target );
+    else
+      tempest->execute_on_target( target );
+  };
+
+  effect.player->callbacks.register_callback_execute_function(
+      effect.spell_id, [ follow_up ]( dbc_proc_callback_t*, const spell_data_t*, player_t* t, action_state_t* ) {
+        follow_up( t );
+      } );
+
+  new dbc_proc_callback_t( effect.player, effect );
+
+  // defeating an enemy guarantees the follow-up on your next attack, once per 10s
+  auto killer_instincts = create_buff<buff_t>( effect.player, effect.player->find_spell( 1307361 ) )
+    ->set_cooldown( effect.player->find_spell( 1307356 )->internal_cooldown() );
+
+  effect.player->register_on_kill_callback( [ p = effect.player, killer_instincts ]( player_t* ) {
+    if ( !p->sim->event_mgr.canceled )
+      killer_instincts->trigger();
+  } );
+
+  auto ki_proc = new special_effect_t( effect.player );
+  ki_proc->name_str = "killer_instincts";
+  ki_proc->spell_id = 1307361;
+  effect.player->special_effects.push_back( ki_proc );
+
+  effect.player->callbacks.register_callback_execute_function(
+      ki_proc->spell_id,
+      [ follow_up, killer_instincts ]( dbc_proc_callback_t*, const spell_data_t*, player_t* t, action_state_t* ) {
+        if ( !killer_instincts->up() )
+          return;
+
+        killer_instincts->expire();
+        follow_up( t );
+      } );
+
+  auto ki_cb = new dbc_proc_callback_t( effect.player, *ki_proc );
+  ki_cb->activate_with_buff( killer_instincts );
+}
+
+// twisted horror's tendril
+// 1310404 driver
+// 1310446 new target driver
+// 1310414 buff
+void twisted_horrors_tendril( special_effect_t& effect )
+{
+  auto new_target_id = 1310446;
+  auto new_target = find_special_effect( effect.player, new_target_id );
+  assert( new_target && "Twisted Horror's Tendril missing new target driver" );
+
+  auto buff = create_buff<stat_buff_t>( effect.player, effect.player->find_spell( 1310414 ) )
+    ->add_stat_from_effect_type( A_MOD_RATING, effect.driver()->effectN( 1 ).average( effect ) );
+
+  effect.custom_buff = buff;
+
+  new dbc_proc_callback_t( effect.player, effect );
+
+  auto eff2 = new special_effect_t( effect.player );
+  eff2->name_str = "twisted_horrors_tendril_new_target";
+  eff2->spell_id = new_target_id;
+  effect.player->special_effects.push_back( eff2 );
+
+  struct twisted_horrors_tendrils_new_target_cb_t : public dbc_proc_callback_t
+  {
+    std::vector<int> _targets;
+    buff_t* _buff;
+
+    twisted_horrors_tendrils_new_target_cb_t( const special_effect_t& e, buff_t* b )
+      : dbc_proc_callback_t( e.player, e ), _buff( b )
+    {}
+
+    void reset() override
+    {
+      _targets.clear();
+    }
+
+    void trigger( const proc_data_t& pd, player_t* t, action_state_t* s, proc_trigger_type_e type ) override
+    {
+      if ( !range::contains( _targets, t->actor_spawn_index ) )
+        dbc_proc_callback_t::trigger( pd, t, s, type );
+    }
+
+    void execute( const spell_data_t*, player_t* t, action_state_t* ) override
+    {
+      listener->sim->print_debug( "{} triggering on new target {} ({}) for Twisted Horror's Tendril.", *listener, *t,
+                                  t->actor_spawn_index );
+      _targets.push_back( t->actor_spawn_index );
+      // 3 stacks is hard coded based on tooltip
+      _buff->trigger( 3 );
+    }
+  };
+
+  new twisted_horrors_tendrils_new_target_cb_t( *eff2, buff );
+}
 }  // namespace trinkets
 
 namespace weapons
@@ -4209,7 +4771,7 @@ void torments_duality( special_effect_t& effect )
         cb->get_debuff( t )->trigger( stacks );
       } );
   }
-  else if ( effect.driver()->id() == 1253359 )  // radiant foil
+  else if ( effect.spell_id == 1253359 )  // radiant foil
   {
     effect.player->sim->error( UNVERIFIED_VALUE,
       "Torment's Duality: Damage increase to Radiant Foil per purified Void Tear is assumed to be added to the base "
@@ -4282,8 +4844,10 @@ void polished_lightwood_channeler( special_effect_t& effect )
   damage->base_dd_min = damage->base_dd_max = effect.driver()->effectN( 1 ).average( effect );
   damage->base_multiplier *= role_mult( effect );
 
-  missile->add_child( damage );
+  missile->dual = true;
   missile->impact_action = damage;
+  missile->stats = damage->stats;
+  damage->stats->action_list.push_back( missile );
 
   effect.execute_action = missile;
 
@@ -4297,6 +4861,100 @@ void janthrazet_the_soul_fang( special_effect_t& effect )
 {
   auto buff = create_buff<stat_buff_t>( effect.player, "soul_fang_alacrity", effect.player->find_spell( 1305360 ) )
     ->add_stat_from_effect_type( A_MOD_RATING, effect.driver()->effectN( 2 ).average( effect ) );
+
+  effect.custom_buff = buff;
+
+  new dbc_proc_callback_t( effect.player, effect );
+}
+
+// Sharpened Lightwood Slasher
+// 1296732 driver
+// 1296735 damage
+void sharpened_lightwood_slasher( special_effect_t& effect )
+{
+  auto damage =
+    create_proc_action<generic_proc_t>( "searing_lightwood", effect, 1296735 );
+  damage->base_dd_min = damage->base_dd_max = effect.driver()->effectN( 1 ).average( effect );
+
+  effect.execute_action = damage;
+
+  new dbc_proc_callback_t( effect.player, effect );
+}
+
+// Zatha'tek, Breath of Corruption
+// 1298023 Driver
+// 1305391 Buff
+// 1305395 Damage
+void zathatek_breath_of_corruption( special_effect_t& effect )
+{
+  struct breath_of_corruption_t : generic_proc_t
+  {
+    double necrotic_tear_mul;
+
+    breath_of_corruption_t( const special_effect_t& effect )
+      : generic_proc_t( effect, "breath_of_corruption", effect.player->find_spell( 1305395 ) ),
+        necrotic_tear_mul( effect.driver()->effectN( 2 ).percent() )
+    {
+      base_dd_min = base_dd_max = effect.driver()->effectN( 1 ).average( effect );
+      base_multiplier *= role_mult( effect );
+      target_debuff = effect.player->find_spell( 1305391 );
+    }
+
+    buff_t* create_debuff( player_t* t ) override
+    {
+      return generic_proc_t::create_debuff( t )
+        ->set_constant_behavior( buff_constant_behavior::NEVER_CONSTANT )
+        ->set_default_value( necrotic_tear_mul );
+    }
+
+    void impact( action_state_t* s ) override
+    {
+      generic_proc_t::impact( s );
+
+      get_debuff( s->target )->trigger();
+    }
+
+    double composite_da_multiplier( const action_state_t* state ) const override
+    {
+      double m = generic_proc_t::composite_da_multiplier( state );
+
+      if ( auto _debuff = find_debuff( state->target ) )
+        m *= 1.0 + _debuff->check_stack_value();
+
+      return m;
+    }
+  };
+
+  auto proc             = create_proc_action<breath_of_corruption_t>( "breath_of_corruption", effect );
+  effect.execute_action = proc;
+
+  new dbc_proc_callback_t( effect.player, effect );
+}
+
+// Light's Justice
+// 1309762 Driver
+// 1309766 Buff (Driver effect 1 val)
+// 1309782 Damage (Driver effect 2 val)
+void lights_justice( special_effect_t& effect )
+{
+  auto buff_spell = effect.trigger();
+  auto buff       = create_buff<stat_buff_t>( effect.player, "lights_justice", buff_spell )
+                        ->set_stat_from_effect_type( A_MOD_RATING, effect.driver()->effectN( 1 ).average( effect ) )
+                        ->set_rppm( RPPM_DISABLE );  // Disable RPPM checks on the buff, this is for the damage trigger.
+
+  auto damage         = create_proc_action<generic_proc_t>( "lights_justice_damage", effect, 1309782 );
+  damage->base_dd_min = damage->base_dd_max = effect.driver()->effectN( 2 ).average( effect );
+  damage->base_multiplier *= role_mult( effect );
+
+  auto damage_proc            = new special_effect_t( effect.player );
+  damage_proc->name_str       = "lights_justice_damage_proc";
+  damage_proc->spell_id       = buff_spell->id();
+  damage_proc->proc_flags2_   = PF2_ALL_HIT;
+  damage_proc->execute_action = damage;
+  effect.player->special_effects.push_back( damage_proc );
+
+  auto damage_cb = new dbc_proc_callback_t( effect.player, *damage_proc );
+  damage_cb->activate_with_buff( buff );
 
   effect.custom_buff = buff;
 
@@ -4529,6 +5187,8 @@ void sporecallers_blooming_loop( special_effect_t& effect )
       dot->dual = damage->dual = true;
       stats = dot->stats;
       damage->stats = dot->stats;
+      dot->stats->action_list.push_back( this );
+      dot->stats->action_list.push_back( damage );
     }
 
     void impact( action_state_t* state ) override
@@ -4589,28 +5249,149 @@ void rotmires_sporeheart( special_effect_t& effect )
   new dbc_proc_callback_t( effect.player, effect );
 }
 
+// 1307906 crit driver
+// 1307910 crit buff
+// 1307923 mast driver
+// 1307922 mast buff
+// 1307928 haste driver
+// 1307927 haste buff
 void venomcursed( special_effect_t& effect )
 {
-  stat_buff_t* buff =
-      debug_cast<stat_buff_t*>( buff_t::find( effect.player, util::tokenize_fn( effect.trigger()->name_cstr() ) ) );
+  effect.custom_buff = create_buff<stat_buff_t>( effect.player, effect.trigger() )
+    ->add_stat_from_effect( 1, effect.driver()->effectN( 1 ).average( effect ) )
+    ->add_stat_from_effect( 2, effect.driver()->effectN( 2 ).average( effect ) );
 
-  bool do_init = false;
-  if ( !buff )
-  {
-    buff    = create_buff<stat_buff_t>( effect.player, effect.trigger() );
-    do_init = true;
-  }
-
-  buff->add_stat_from_effect( 1, effect.driver()->effectN( 1 ).average( effect ) )
-      ->add_stat_from_effect( 2, effect.driver()->effectN( 2 ).average( effect ) );
-
-  if ( do_init )
-  {
-    effect.custom_buff = buff;
-    new dbc_proc_callback_t( effect.player, effect );
-  }
+  new dbc_proc_callback_t( effect.player, effect );
 }
 
+// 1317582 Ascendace (random stat) driver
+// 1317581 Ascendace (random stat) buff
+void venomcursed_ascendance( special_effect_t& effect )
+{
+  struct venomcursed_ascendance_cb_t : public dbc_proc_callback_t
+  {
+    stat_buff_t* buff;
+    double pos_value;
+    double neg_value;
+
+    venomcursed_ascendance_cb_t( const special_effect_t& e )
+      : dbc_proc_callback_t( e.player, e ),
+        pos_value( e.driver()->effectN( 1 ).average( e ) ),
+        neg_value( e.driver()->effectN( 2 ).average( e ) )
+    {
+      // Because the buff pandemics, we can't use create_all_stat_buffs and must instead utilize a single buff with
+      // hacked execute using update_player_buff_stat and directly stat amount manipulation.
+      buff = create_buff<stat_buff_t>( e.player, e.trigger() )
+        ->add_stat_from_effect( 1, pos_value )
+        ->add_stat_from_effect( 2, neg_value )
+        ->add_stat_from_effect( 3, neg_value )
+        ->add_stat_from_effect( 4, neg_value );
+    }
+
+    void ascendance_stat_change( stat_e stat, bool update )
+    {
+      for ( auto& s : buff->stats )
+      {
+        if ( update )
+          buff->update_player_buff_stat( s, 0 );
+
+        s.amount = s.stat == stat ? pos_value : neg_value;
+
+        if ( update )
+          buff->update_player_buff_stat( s, 1 );
+      }
+    }
+
+    void execute( const spell_data_t*, player_t*, action_state_t* ) override
+    {
+      auto rng_stat = rng().range( buff->stats );
+
+      if ( listener->sim->debug )
+      {
+        listener->sim->print_debug( "{} {} with stat: {}", *buff, buff->check() ? "refreshes" : "procs",
+                                    util::stat_type_abbrev( rng_stat.stat ) );
+      }
+
+      // update stat amounts if the randomly chosen stat is not already positive
+      if ( rng_stat.amount != pos_value )
+        ascendance_stat_change( rng_stat.stat, buff->check() );
+
+      buff->trigger();
+    }
+  };
+
+  new venomcursed_ascendance_cb_t( effect );
+}
+
+// voidweaver's vestments
+// leggings of palpable terror
+// aberrant commander's gauntlets
+// corroded hulk's skullcap
+// 1310208 driver
+// 1310209 damage
+void void_eruption( special_effect_t& effect )
+{
+  effect.player->sim->error( UNVERIFIED_IMPLEMENTATION,
+    "{}: Damage is assumed to not be split amongst targets hit.", effect.item->full_name() );
+
+  // assumed to not split so use generic_proc_t and just set aoe = -1;
+  auto damage = create_proc_action<generic_aoe_proc_t>( "void_eruption", effect, 1310209 );
+  damage->aoe = -1;
+  damage->base_dd_min = damage->base_dd_max = effect.driver()->effectN( 1 ).average( effect );
+  damage->base_multiplier *= role_mult( effect );
+
+  // TODO: generalize this into unique_gear.cpp if other item bonus tags need similar checks
+  for ( const auto& item : effect.player->items )
+  {
+    for ( auto bonus_id : item.parsed.bonus_id )
+    {
+      for ( const auto& bonus_entry : effect.player->dbc->item_bonus( bonus_id ) )
+      {
+        if ( bonus_entry.type == ITEM_BONUS_DESC && bonus_entry.value_1 == 14447 )
+        {
+          effect.player->sim->print_debug( "{} venomcursed item '{} ({})' found.", *effect.player, item.name(),
+                                           item.parsed.data.id );
+          damage->base_multiplier *= 1.0 + effect.driver()->effectN( 2 ).percent();
+          goto create_callback;
+        }
+      }
+    }
+  }
+
+create_callback:
+  effect.execute_action = damage;
+
+  new dbc_proc_callback_t( effect.player, effect );
+}
+
+// band of the swarmcaller
+// 1310082 driver
+// 1310083 missile
+// 1310088 damage
+void call_the_swarm( special_effect_t& effect )
+{
+  effect.player->sim->error( UNVERIFIED_IMPLEMENTATION,
+    "Band of the Swarmcaller: Damage is assumed to not be split amongst targets hit." );
+
+  auto missile = create_proc_action<generic_proc_t>( "call_the_swarm", effect, effect.trigger() );
+
+  // assumed to not split so use generic_proc_t and just set aoe = -1;
+  // possible 5 target DR based on driver effect#2?
+  auto damage =
+    create_proc_action<generic_proc_t>( "acidbrood_scourge", effect, missile->data().effectN( 1 ).trigger() );
+  damage->aoe = -1;
+  damage->base_dd_min = damage->base_dd_max = effect.driver()->effectN( 1 ).average( effect );
+  damage->base_multiplier *= role_mult( effect );
+
+  missile->dual = true;
+  missile->impact_action = damage;
+  missile->stats = damage->stats;  // report the damage only
+  damage->stats->action_list.push_back( missile );
+
+  effect.execute_action = missile;
+
+  new dbc_proc_callback_t( effect.player, effect );
+}
 }  // namespace armors
 
 namespace sets
@@ -4632,8 +5413,9 @@ action_t* create_mrm_action( std::string n, const special_effect_t& e, unsigned 
   auto impact = create_proc_action<T>( n, e, missile->data().effectN( 1 ).trigger() );
   impact->base_dd_min = impact->base_dd_max = a;
   missile->dual = true;
-  missile->stats = impact->stats;  // report the damage only
   missile->impact_action = impact;
+  missile->stats = impact->stats;  // report the damage only
+  impact->stats->action_list.push_back( missile );
 
   return missile;
 }
@@ -4847,11 +5629,9 @@ struct rune_of_echoes_debuff_t : public buff_t
   double accumulator;
   action_t* echo;
 
-  rune_of_echoes_debuff_t( actor_pair_t pair, std::string_view n, const spell_data_t* s,
-                           action_t* d )
+  rune_of_echoes_debuff_t( actor_pair_t pair, std::string_view n, const spell_data_t* s, action_t* d )
     : buff_t( pair, n, s ), accumulator( 0 ), echo( d )
-  {
-  }
+  {}
 
   void reset() override
   {
@@ -4883,9 +5663,12 @@ struct lingering_rune_t : public BASE
   double echo_coeff;
   action_t* echo;
 
-  lingering_rune_t( const special_effect_t& e, std::string_view n, const spell_data_t* s, bool ech, double coef, action_t* d )
+  lingering_rune_t( const special_effect_t& e, std::string_view n, const spell_data_t* s, bool ech, double coef,
+                    action_t* d )
     : BASE( e, n, s ), has_echoes( ech ), echo_coeff( coef ), echo( d )
   {
+    if ( has_echoes )
+      BASE::target_debuff = e.player->find_spell( 1289063 );
   }
 
   buff_t* create_debuff( player_t* t ) override
@@ -4893,8 +5676,10 @@ struct lingering_rune_t : public BASE
     auto debuff = buff_t::find( t, "rune_of_echoes_debuff" );
 
     if ( !debuff )
+    {
       debuff = make_buff<rune_of_echoes_debuff_t>( actor_pair_t( t, BASE::player ), "rune_of_echoes_debuff",
-                                                   BASE::player->find_spell( 1289063 ), echo );
+                                                   BASE::target_debuff, echo );
+    }
 
     return debuff;
   }
@@ -4940,6 +5725,8 @@ struct omnium_core_rune_t : public BASE
     has_echoes = find_special_effect( e.player, 1279616 ) != nullptr;
     if ( has_echoes )
     {
+      BASE::target_debuff = e.player->find_spell( 1289063 );
+
       echo              = create_proc_action<BASE>( fmt::format( "{}_echo", n ), e, heal ? 1303071 : 1303048 );
       echo->base_dd_min = echo->base_dd_max = 1.0;  // actual value is determined by accumulator
       echo->name_str_reporting               = "rune_of_echoes";
@@ -4978,8 +5765,10 @@ struct omnium_core_rune_t : public BASE
     auto debuff = buff_t::find( t, "rune_of_echoes_debuff" );
 
     if ( !debuff )
+    {
       debuff = make_buff<rune_of_echoes_debuff_t>( actor_pair_t( t, BASE::player ), "rune_of_echoes_debuff",
-                                                   BASE::player->find_spell( 1289063 ), echo );
+                                                   BASE::target_debuff, echo );
+    }
 
     return debuff;
   }
@@ -5180,17 +5969,17 @@ void zuljins_guillotine_technique( special_effect_t& effect )
 {
   struct guillotine_t : public generic_proc_t
   {
-    const special_effect_t& effect;
+    double mul_per_hp_pct;
 
     guillotine_t( const special_effect_t& e, std::string_view n, const spell_data_t* s )
-      : generic_proc_t( e, n, s ), effect( e )
+      : generic_proc_t( e, n, s ), mul_per_hp_pct( e.driver()->effectN( 2 ).percent() )
     {
       base_dd_min = base_dd_max = e.driver()->effectN( 1 ).average( e );
       base_multiplier *= role_mult( e );
       if ( e.player->sets->has_set_bonus( e.player->specialization(), MID_BOZ, B2 ) )
       {
         auto bite_of_zuljan_driver        = find_special_effect( e.player, 1291726 );
-        // Currently set to 100% of the base damage of the original proc, but wiring the spell data in case this changes. 
+        // Currently set to 100% of the base damage of the original proc, but wiring the spell data in case this changes.
         base_dd_min *= bite_of_zuljan_driver->driver()->effectN( 2 ).percent();
         base_dd_max *= bite_of_zuljan_driver->driver()->effectN( 2 ).percent();
 
@@ -5204,8 +5993,8 @@ void zuljins_guillotine_technique( special_effect_t& effect )
     double composite_target_multiplier( player_t* target ) const override
     {
       double m = generic_proc_t::composite_target_multiplier( target );
-      
-      m *= 1.0 + effect.driver()->effectN( 2 ).percent() * ( 100 - target->health_percentage() );
+
+      m *= 1.0 + mul_per_hp_pct * ( 100 - target->health_percentage() );
 
       return m;
     }
@@ -5228,45 +6017,53 @@ void venomfang( special_effect_t& effect )
   effect.execute_action = create_proc_action<venomfang_t>( "venomfang", effect );
   new dbc_proc_callback_t( effect.player, effect );
 }
-
 }  // namespace bite_of_zuljan
 
 void register_special_effects()
 {
   // NOTE: use unique_gear:: namespace for static consumables so we don't activate them with enable_all_item_effects
   // Food
-  unique_gear::register_special_effect( 1232257, consumables::selector_food( 1219185, true ) );  // bloom skewers / [PH] Vegetarian Recipe
-  unique_gear::register_special_effect( 1232916, consumables::selector_food( 1219185, true ) );  // braised blood hunter
-  unique_gear::register_special_effect( 1232915, consumables::selector_food( 1219185, true ) );  // crimson calamari
-  unique_gear::register_special_effect( 1219187, consumables::selector_food( 1219185, true ) );  // felberry figs
-  unique_gear::register_special_effect( 1232914, consumables::selector_food( 1219185, true ) );  // tasty smoked tetra
-  unique_gear::register_special_effect( 1232489, consumables::selector_food( 1219185, true ) );  // twilight angler's medley
-  unique_gear::register_special_effect( 1259656, consumables::selector_food( 1232324, true ) );  // blooming feast
-  unique_gear::register_special_effect( 1232919, consumables::selector_food( 1233408, true ) );  // flora frenzy / champion's bento
-  unique_gear::register_special_effect( 1259657, consumables::selector_food( 1232325, true ) );  // quel'dorei medley
-  unique_gear::register_special_effect( 1259658, consumables::primary_food( 1232582, STAT_STR_AGI_INT, 2 ) ); // rootland celebration
+  unique_gear::register_special_effect( 1296432, consumables::selector_food( 1305154, true, 1.1 ) ); // amani cornucopia
+  unique_gear::register_special_effect( 1259656, consumables::selector_food( 1232091, true ) ); // blooming feast
+  unique_gear::register_special_effect( 1232919, consumables::selector_food( 1284619, true ) ); // champion's bento / flora frenzy / puffer plate / sweet-and-sour-skewers / venom-spiced cutlet
+  unique_gear::register_special_effect( 1296434, consumables::selector_food( 1305151, true, 1.1 ) ); // feast of knowledge
+  unique_gear::register_special_effect( 1296433, consumables::selector_food( 1305154, true, 1.1 ) ); // loa's gathering
+  unique_gear::register_special_effect( 1259657, consumables::selector_food( 1232089, true ) ); // quel'dorei medley
+
+  unique_gear::register_special_effect( 1232257, consumables::primary_food( 1232325, STAT_STR_AGI_INT, 2, 0.5 ) ); // bloom skewers
+  unique_gear::register_special_effect( 1259658, consumables::primary_food( 1232585, STAT_STR_AGI_INT, 2 ) ); // harandar celebration
+  unique_gear::register_special_effect( 1232917, consumables::primary_food( 1294727, STAT_STR_AGI_INT, 2 ) ); // impossibly royal roast / royal roast
+  unique_gear::register_special_effect( 1232256, consumables::primary_food( 1232324, STAT_STR_AGI_INT, 2, 0.5 ) ); // mana-infused stew
   unique_gear::register_special_effect( 1259659, consumables::primary_food( 1232585, STAT_STR_AGI_INT, 2 ) ); // silvermoon parade
-  unique_gear::register_special_effect( 1232917, consumables::primary_food( 1232584, STAT_STR_AGI_INT, 2 ) );  // [impossibly] royal roast
-  unique_gear::register_special_effect( 1232902, consumables::secondary_food( 1219183, STAT_CRIT_RATING ) ); // arcano cutlets
-  unique_gear::register_special_effect( 1232903, consumables::secondary_food( 1232087, STAT_HASTE_RATING ) ); // fel-kissed filet
-  unique_gear::register_special_effect( 1232905, consumables::secondary_food( 1232089, STAT_MASTERY_RATING ) ); // warped wise wings
-  unique_gear::register_special_effect( 1232906, consumables::secondary_food( 1232091, STAT_VERSATILITY_RATING ) ); // void-kissed fish rolls
-  unique_gear::register_special_effect( 1232253, consumables::secondary_food( 1232321, STAT_CRIT_RATING, STAT_VERSATILITY_RATING ) ); // spiced biscuits
-  unique_gear::register_special_effect( 1232910, consumables::secondary_food( 1232492, STAT_VERSATILITY_RATING, STAT_SPEED_RATING ) ); // buttered root crab
-  unique_gear::register_special_effect( 1232481, consumables::secondary_food( 1233400, STAT_MASTERY_RATING, STAT_HASTE_RATING ) ); // bloodthistle-wrapped cutlets
-  unique_gear::register_special_effect( 1232485, consumables::secondary_food( 1232318, STAT_MASTERY_RATING, STAT_CRIT_RATING ) ); // eversong pudding
-  unique_gear::register_special_effect( 1232246, consumables::secondary_food( 1232316, STAT_MASTERY_RATING, STAT_HASTE_RATING ) ); // farstrider rations
-  unique_gear::register_special_effect( 1232252, consumables::secondary_food( 1233403, STAT_MASTERY_RATING, STAT_VERSATILITY_RATING ) ); // silvermoon standard
-  unique_gear::register_special_effect( 1232908, consumables::secondary_food( 1232491, STAT_MASTERY_RATING, STAT_SPEED_RATING ) ); // null and void plate
-  unique_gear::register_special_effect( 1232483, consumables::secondary_food( 1233401, STAT_MASTERY_RATING, STAT_SPEED_RATING ) ); // hearthflame supper
-  unique_gear::register_special_effect( 1232251, consumables::secondary_food( 1233404, STAT_MASTERY_RATING, STAT_CRIT_RATING ) ); // forager's medley
-  unique_gear::register_special_effect( 1232487, consumables::secondary_food( 1233402, STAT_CRIT_RATING, STAT_VERSATILITY_RATING ) ); // wise tails
-  unique_gear::register_special_effect( 1232486, consumables::secondary_food( 1232318, STAT_CRIT_RATING, STAT_VERSATILITY_RATING ) ); // fried bloomtail
-  unique_gear::register_special_effect( 1232909, consumables::secondary_food( 1232493, STAT_HASTE_RATING, STAT_SPEED_RATING ) ); // glitter skewers
-  unique_gear::register_special_effect( 1232250, consumables::secondary_food( 1233405, STAT_VERSATILITY_RATING, STAT_HASTE_RATING ) ); // quick sandwich
-  unique_gear::register_special_effect( 1232907, consumables::secondary_food( 1232490, STAT_CRIT_RATING, STAT_SPEED_RATING ) ); // sun-seared lumifin
-  unique_gear::register_special_effect( 1232249, consumables::secondary_food( 1233401, STAT_CRIT_RATING, STAT_HASTE_RATING ) ); // portable snack
-  unique_gear::register_special_effect( 1232484, consumables::secondary_food( 1233405, STAT_VERSATILITY_RATING, STAT_HASTE_RATING ) ); // sunwell delight
+  unique_gear::register_special_effect( 1232488, consumables::primary_food( 1232407, STAT_STR_AGI_INT, 2, 0.7 ) ); // spellfire filet
+  unique_gear::register_special_effect( 1232489, consumables::primary_food( 1232408, STAT_STR_AGI_INT, 2, 0.7 ) ); // twilight angler's medley
+
+  unique_gear::register_special_effect( 1232902, consumables::secondary_food( 1219183, STAT_CRIT_RATING, STAT_NONE, 0.9 ) ); // arcano cutlets
+  unique_gear::register_special_effect( 1232916, consumables::secondary_food( 1232501, STAT_VERSATILITY_RATING, STAT_NONE, 0.9 ) ); // braised blood hunter
+  unique_gear::register_special_effect( 1232910, consumables::secondary_food( 1232492, STAT_VERSATILITY_RATING, STAT_NONE, 0.9 ) ); // buttered root crab
+  unique_gear::register_special_effect( 1232915, consumables::secondary_food( 1232500, STAT_HASTE_RATING, STAT_NONE, 0.9 ) );  // crimson calamari
+  unique_gear::register_special_effect( 1232903, consumables::secondary_food( 1219182, STAT_HASTE_RATING, STAT_NONE, 0.9 ) ); // fel-kissed filet
+  unique_gear::register_special_effect( 1232901, consumables::secondary_food( 1283372, STAT_VERSATILITY_RATING, STAT_NONE, 0.7 ) ); // felberry figs
+  unique_gear::register_special_effect( 1232909, consumables::secondary_food( 1232491, STAT_MASTERY_RATING, STAT_NONE, 0.9 ) ); // glitter skewers
+  unique_gear::register_special_effect( 1232908, consumables::secondary_food( 1232493, STAT_HASTE_RATING, STAT_NONE, 0.9 ) ); // null and void plate
+  unique_gear::register_special_effect( 1232907, consumables::secondary_food( 1232490, STAT_CRIT_RATING, STAT_NONE, 0.9 ) ); // sun-seared lumifin
+  unique_gear::register_special_effect( 1232914, consumables::secondary_food( 1232490, STAT_CRIT_RATING, STAT_NONE, 0.9 ) ); // tasty smoked tetra
+  unique_gear::register_special_effect( 1232906, consumables::secondary_food( 1219184, STAT_VERSATILITY_RATING, STAT_NONE, 0.9 ) ); // void-kissed fish rolls
+  unique_gear::register_special_effect( 1232905, consumables::secondary_food( 1219185, STAT_MASTERY_RATING, STAT_NONE, 0.9 ) ); // warped wise wings
+
+  unique_gear::register_special_effect( 1232481, consumables::secondary_food( 1233400, STAT_MASTERY_RATING, STAT_HASTE_RATING, 0.7 ) ); // bloodthistle-wrapped cutlets
+  unique_gear::register_special_effect( 1232485, consumables::secondary_food( 1233404, STAT_MASTERY_RATING, STAT_CRIT_RATING, 0.7 ) ); // eversong pudding
+  unique_gear::register_special_effect( 1232246, consumables::secondary_food( 1232316, STAT_MASTERY_RATING, STAT_HASTE_RATING, 0.5 ) ); // farstrider rations
+  unique_gear::register_special_effect( 1232251, consumables::secondary_food( 1232318, STAT_MASTERY_RATING, STAT_CRIT_RATING, 0.5 ) ); // forager's medley
+  unique_gear::register_special_effect( 1232486, consumables::secondary_food( 1233406, STAT_MASTERY_RATING, STAT_VERSATILITY_RATING, 0.7 ) ); // fried bloomtail
+  unique_gear::register_special_effect( 1232483, consumables::secondary_food( 1233401, STAT_HASTE_RATING, STAT_CRIT_RATING, 0.7 ) ); // hearthflame supper
+  unique_gear::register_special_effect( 1232249, consumables::secondary_food( 1232313, STAT_CRIT_RATING, STAT_HASTE_RATING, 0.5 ) ); // portable snack
+  unique_gear::register_special_effect( 1232250, consumables::secondary_food( 1232317, STAT_VERSATILITY_RATING, STAT_HASTE_RATING, 0.5 ) ); // quick sandwich
+  unique_gear::register_special_effect( 1232252, consumables::secondary_food( 1232320, STAT_MASTERY_RATING, STAT_VERSATILITY_RATING, 0.5 ) ); // silvermoon standard
+  unique_gear::register_special_effect( 1232253, consumables::secondary_food( 1232321, STAT_CRIT_RATING, STAT_VERSATILITY_RATING, 0.5 ) ); // spiced biscuits
+  unique_gear::register_special_effect( 1232484, consumables::secondary_food( 1233405, STAT_VERSATILITY_RATING, STAT_HASTE_RATING, 0.7 ) ); // sunwell delight
+  unique_gear::register_special_effect( 1232487, consumables::secondary_food( 1233402, STAT_CRIT_RATING, STAT_VERSATILITY_RATING, 0.7 ) ); // wise tails
+
   // Flasks
   // Potions
   register_special_effect( 1236998, consumables::draught_of_rampant_abandon );
@@ -5275,7 +6072,6 @@ void register_special_effects()
   set_min_version( wowv_t( 12, 1, 0 ) );
   register_special_effect( 1295132, consumables::liquid_luster, true );
   register_special_effect( 1295015, consumables::alluring_nostrum );
-  
   reset_version_check();
   // Oils
   register_special_effect( { 1262056, 1262111 }, consumables::laced_zoomshots );
@@ -5294,6 +6090,7 @@ void register_special_effects()
   register_special_effect( { 1236700, 1236701 }, enchants::eyes_of_the_eagle, false, true );
   register_special_effect( { 1262295, 1262298 }, enchants::smugglers_lynxeye );
   register_special_effect( { 1262337, 1262339 }, enchants::farstriders_hawkeye );
+  register_special_effect( { 1297651, 1297652 }, enchants::rite_of_the_hashey );
   // Embellishments & Tinkers
   register_special_effect( 1283697, embellishments::arcanoweave_lining );
   register_special_effect( 1241711, embellishments::sunfire_silk_lining );
@@ -5313,7 +6110,7 @@ void register_special_effects()
   register_special_effect( 1296870, embellishments::adorned_fang );
   register_special_effect( 1297382, embellishments::hunters_ritual_stone );
   reset_version_check();
-  
+
   // Darkmoon Trinkets & Embellishments
   register_special_effect( { 1245001, 1245053 }, darkmoon::blood );
   register_special_effect( { 1245055, 1245051 }, darkmoon::rot );
@@ -5370,6 +6167,7 @@ void register_special_effects()
   register_special_effect( 1258535, trinkets::volatile_void_suffuser );
   register_special_effect( 1272693, trinkets::astalors_anguish_agitator );
   register_special_effect( 1272690, DISABLED_EFFECT ); // Astalors Anguish Agitator Passive Driver
+  register_special_effect( { 1247568, 1247569, 1247570, 1247571 }, trinkets::drum_of_renewed_bonds );
   register_special_effect( 1247311, DISABLED_EFFECT ); // Drum of Renewed Bonds on use
   register_special_effect( 1253120, trinkets::glorious_crusaders_keepsake );
   register_special_effect( 1253112, trinkets::sylvan_wakrapuku );
@@ -5378,7 +6176,6 @@ void register_special_effects()
   register_special_effect( 1250588, trinkets::permafrost_essence );
   set_min_version( wowv_t( 12, 0, 7 ) );
   register_special_effect( 1284696, trinkets::sporelords_mycelium );
-  reset_version_check();
   set_min_version( wowv_t( 12, 1, 0 ) );
   register_special_effect( 1295058, trinkets::wavecallers_seastone );
   register_special_effect( 1293316, trinkets::vile_vial_of_volatile_venom );
@@ -5403,6 +6200,15 @@ void register_special_effects()
   register_special_effect( 1293326, trinkets::tattered_amani_war_banner );
   register_special_effect( 1294746, trinkets::sethraliss_defiled_relic );
   register_special_effect( 1294747, DISABLED_EFFECT );  // Sethraliss' Defiled Relic equip driver
+  register_special_effect( 1291894, trinkets::soulcoiler_ritual_vessel );
+  register_special_effect( 1291885, DISABLED_EFFECT );  // Soulcoiler Ritual Vessel equip Driver
+  register_special_effect( 1306743, trinkets::ophidian_bone_whistle );
+  register_special_effect( 1296883, DISABLED_EFFECT );  // Ophidian Bone Whistle equip driver
+  register_special_effect( 1295617, trinkets::sszoraks_ferocity );
+  register_special_effect( 1307356, DISABLED_EFFECT );  // Sszorak's Ferocity killing blow driver
+  set_min_version( wowv_t( 12, 1, 5 ) );
+  register_special_effect( 1310404, trinkets::twisted_horrors_tendril );
+  register_special_effect( 1310446, DISABLED_EFFECT );  // twisted horror's tendril new target driver
   reset_version_check();
   // Weapons
   register_special_effect( { 1253357, 1253359 }, weapons::torments_duality );  // umbral sabre & radiant foil
@@ -5411,7 +6217,11 @@ void register_special_effects()
   set_min_version( wowv_t( 12, 1, 0 ) );
   register_special_effect( 1296874, weapons::polished_lightwood_channeler );
   register_special_effect( 1298085, weapons::janthrazet_the_soul_fang );
+  register_special_effect( 1296732, weapons::sharpened_lightwood_slasher );
+  register_special_effect( 1298023, weapons::zathatek_breath_of_corruption );
   register_special_effect( 1291718, bite_of_zuljan::venomfang );
+  set_min_version( wowv_t( 12, 1, 5 ) );
+  register_special_effect( 1309762, weapons::lights_justice );
   reset_version_check();
   // Armor
   register_special_effect( 1271211, armors::eternal_voidsong_chain );
@@ -5423,9 +6233,12 @@ void register_special_effects()
   set_min_version( wowv_t( 12, 0, 7 ) );
   register_special_effect( 1285138, armors::sporecallers_blooming_loop );
   register_special_effect( 1285139, armors::rotmires_sporeheart );
-  reset_version_check();
   set_min_version( wowv_t( 12, 1, 0 ) );
   register_special_effect( { 1307906, 1307923, 1307928 }, armors::venomcursed );
+  register_special_effect( 1317582, armors::venomcursed_ascendance );
+  set_min_version( wowv_t( 12, 1, 5 ) );
+  register_special_effect( 1310208, armors::void_eruption );
+  register_special_effect( 1310082, armors::call_the_swarm );
   reset_version_check();
   // Sets
   register_special_effect( 1281574, sets::voidlight_bindings );

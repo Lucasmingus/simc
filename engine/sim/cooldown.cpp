@@ -150,7 +150,15 @@ void cooldown_t::adjust_recharge_multiplier()
   double old_multiplier = recharge_multiplier;
   assert( action && "Only cooldowns with associated action can have their recharge multiplier adjusted." );
   recharge_multiplier = action->recharge_multiplier( *this ) * action->recharge_rate_multiplier( *this );
-  assert( recharge_multiplier > 0.0 );
+
+  if ( recharge_multiplier == 0.0 )
+  {
+    // Fully reset the cooldown if recharge multiplier is adjusted to be 0, which typically happens via -100% modify
+    // recharge time effect
+    reset( false, -1 );
+    return;
+  }
+
   if ( old_multiplier == recharge_multiplier )
   {
     return;
@@ -161,8 +169,8 @@ void cooldown_t::adjust_recharge_multiplier()
 
   if ( sim.debug )
   {
-    sim.out_debug.print( "{} dynamic cooldown {} adjusted: new_ready={} old_ready={} old_mul={} new_mul={}",
-        *(action -> player), name(), ready, old_ready, old_multiplier, recharge_multiplier );
+    sim.print_debug( "{} dynamic cooldown {} adjusted: new_ready={} old_ready={} old_mul={} new_mul={}",
+                     *( action->player ), name(), ready, old_ready, old_multiplier, recharge_multiplier );
   }
 }
 
@@ -763,7 +771,7 @@ void cooldown_t::set_max_charges( int new_max_charges )
      * Use adjust to go from 0 charges and 0 cooldown progress to the previously calculated charges we should have after
      * changing max charges by making the cooldown advance in time by the multiple of the cooldown.
      */
-    adjust( -charges_fractional * cooldown_t::cooldown_duration( this ) );
+    adjust( -charges_fractional * cooldown_t::cooldown_duration( this ), true, false );
   }
 
   // If the player is queueing an action that uses this cooldown, cancel it.

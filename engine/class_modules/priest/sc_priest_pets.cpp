@@ -334,9 +334,6 @@ struct priest_pet_spell_t : public parse_action_effects_t<spell_t>
   {
     double mul = p().o().talents.discipline.atonement->effectN( 1 ).percent();
 
-    if ( !p().o().options.discipline_in_raid )
-      mul *= 1 + p().o().talents.discipline.atonement->effectN( 3 ).percent();
-
     if ( p().o().talents.discipline.abyssal_reverie.enabled() &&
          ( dbc::get_school_mask( s->action->school ) & SCHOOL_SHADOW ) != SCHOOL_SHADOW && affected_by_reveries )
       mul *= 1 + p().o().talents.discipline.abyssal_reverie->effectN( 1 ).percent();
@@ -587,9 +584,8 @@ struct shadowfiend_pet_t final : public base_fiend_pet_t
   shadowfiend_pet_t( priest_t* owner, util::string_view name = "shadowfiend" )
     : base_fiend_pet_t( owner, name, fiend_type::Shadowfiend ),
       power_leech_insanity( o().find_spell( 262485 )->effectN( 1 ).resource( RESOURCE_INSANITY ) ),
-      power_leech_mana( o().specialization() == PRIEST_SHADOW
-                            ? 0.0
-                            : o().find_spell( 343727 )->effectN( 1 ).resource( RESOURCE_MANA ) )
+      power_leech_mana( o().specialization() == PRIEST_SHADOW ? 0.0
+                                                              : o().find_spell( 343727 )->effectN( 1 ).percent() / 10 )
   {
     direct_power_mod = 0.408;  // New modifier after Spec Spell has been 0'd -- Anshlun 2020-10-06
 
@@ -636,7 +632,7 @@ struct mindbender_pet_t final : public base_fiend_pet_t
     // Empirically tested to match 3/10/2023, actual value not available in spell data
     if ( owner->specialization() == PRIEST_DISCIPLINE )
     {
-      direct_power_mod = 0.3;
+      direct_power_mod = 0.6;
     }
 
     npc_id = 62982;

@@ -1549,6 +1549,7 @@ sim_t::sim_t()
     ignore_invulnerable_targets( false ),
     enable_dps_healing( false ),
     count_overheal_as_heal( false ),
+    dhaps_healing_weight( 1.0 ),
     scaling_normalized( 1.0 ),
     merge_enemy_priority_dmg( false ),
     profileset_controller_factory(
@@ -2821,22 +2822,33 @@ void sim_t::init()
   {
     // Determine whether we have healers.
     unsigned int healers = 0;
+    unsigned int dps     = 0;
+    unsigned int tanks   = 0;
     for ( const auto* p : player_no_pet_list )
     {
       if ( p->primary_role() == ROLE_HEAL )
         ++healers;
+      else if ( p->primary_role() == ROLE_TANK )
+        ++tanks;
+      else if ( p->primary_role() != ROLE_HYBRID )
+        ++dps;
     }
+
+    bool dungeon_based_sim = ( fight_style == FIGHT_STYLE_DUNGEON_SLICE || fight_style == FIGHT_STYLE_DUNGEON_ROUTE );
+    unsigned int players_for_content = dungeon_based_sim ? 5 : 20;
+
+    int healing_targets_to_create = healing > 0          ? healing
+                                    : single_actor_batch ? players_for_content - 1
+                                                         : players_for_content - ( healers + dps + tanks );
+
     if ( healers > 0 || healing > 0 )
-      heal_target = module_t::heal_enemy() -> create_player( this, "Healing_Target", RACE_NONE );
-    if ( healing > 1 )
     {
-      int targets_create = healing;
-      do
+      while ( healing_targets_to_create > 0 )
       {
-        heal_target = module_t::heal_enemy() -> create_player( this, "Healing_Target_" + util::to_string( targets_create ), RACE_NONE );
-        targets_create--;
+        heal_target = module_t::heal_enemy()->create_player(
+            this, "Healing_Target_" + util::to_string( healing_targets_to_create ), RACE_NONE );
+        healing_targets_to_create--;
       }
-      while ( targets_create > 1 );
     }
   }
 
@@ -3992,6 +4004,7 @@ void sim_t::create_options()
   add_option( opt_bool( "ignore_invulnerable_targets", ignore_invulnerable_targets ) );
   add_option( opt_bool( "enable_dps_healing", enable_dps_healing ) );
   add_option( opt_bool( "count_overheal_as_heal", count_overheal_as_heal ) );
+  add_option( opt_float( "dhaps_healing_weight", dhaps_healing_weight ) );
   add_option( opt_float( "scaling_normalized", scaling_normalized ) );
   add_option( opt_bool( "merge_enemy_priority_dmg", merge_enemy_priority_dmg ) );
   add_option( opt_int( "decorated_tooltips", decorated_tooltips ) );

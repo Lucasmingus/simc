@@ -41,6 +41,8 @@ struct power_word_radiance_t final : public priest_heal_t
     {
       priest().buffs.harsh_discipline->trigger();
     }
+
+    priest().buffs.evangelism->decrement();
   }
 
   void impact( action_state_t* s ) override
@@ -147,8 +149,8 @@ struct pain_suppression_t final : public priest_spell_t
   buff_t* create_debuff( player_t* t ) override
   {
     return priest_spell_t::create_debuff( t )
-      ->set_default_value_from_effect_type( A_MOD_DAMAGE_PERCENT_TAKEN )
-      ->set_cooldown( 0_ms );  // Let the ability handle the CD
+        ->set_default_value_from_effect_type( A_MOD_DAMAGE_PERCENT_TAKEN )
+        ->set_cooldown( 0_ms );  // Let the ability handle the CD
   }
 
   void execute() override
@@ -276,12 +278,11 @@ protected:
       return d;
     }
 
-    
     double composite_atonement_multiplier( action_state_t* s ) override
     {
       double mul = priest_spell_t::composite_atonement_multiplier( s );
 
-      if ( p().talents.voidweaver.void_infusion.enabled() )
+      if ( p().talents.voidweaver.void_infusion.enabled() && p().buffs.entropic_rift->check() )
         mul *= 1 + p().talents.voidweaver.void_infusion->effectN( 2 ).percent();
 
       return mul;
@@ -307,11 +308,65 @@ protected:
       {
         priest().buffs.holy_ray->trigger();
       }
+
+      if ( priest().talents.discipline.weal_and_woe.enabled() )
+      {
+        priest().buffs.weal_and_woe->trigger();
+      }
+    }
+  };
+
+  struct penance_heal_t : public priest_heal_t
+  {
+    // TODO: implement contrition
+    penance_heal_t( priest_t& p, util::string_view n, const spell_data_t* s ) : priest_heal_t( n, p, s )
+    {
+      background = dual = direct_tick = tick_may_crit = may_crit = true;
+    }
+
+    action_state_t* new_state() override
+    {
+      return new state_t( this, target );
+    }
+
+    state_t* cast_state( action_state_t* s )
+    {
+      return static_cast<state_t*>( s );
+    }
+
+    const state_t* cast_state( const action_state_t* s ) const
+    {
+      return static_cast<const state_t*>( s );
+    }
+
+    double composite_da_multiplier( const action_state_t* s ) const override
+    {
+      double d = priest_heal_t::composite_da_multiplier( s );
+
+      d *= cast_state( s )->snapshot_mult;
+
+      return d;
+    }
+
+    void execute() override
+    {
+      priest_heal_t::execute();
+
+      if ( priest().talents.discipline.holy_ray.enabled() )
+      {
+        priest().buffs.holy_ray->trigger();
+      }
+
+      if ( priest().talents.discipline.weal_and_woe.enabled() )
+      {
+        priest().buffs.weal_and_woe->trigger();
+      }
     }
   };
 
 private:
   propagate_const<penance_damage_t*> damage;
+  propagate_const<penance_heal_t*> heal;
   unsigned max_spread_targets;
   double default_bolts;
 
@@ -320,6 +375,7 @@ public:
                   const spell_data_t* s_tick )
     : priest_spell_t( name, p, s ),
       damage( new penance_damage_t( p, std::string( name ) + "_tick", s_tick ) ),
+      heal( new penance_heal_t( p, std::string( name ) + "_heal_tick", p.find_spell( 47750 ) ) ),
       max_spread_targets( as<unsigned>( 1 + priest().talents.discipline.revel_in_darkness->effectN( 2 ).base_value() ) )
   {
     cooldown = p.cooldowns.penance;
@@ -407,11 +463,19 @@ public:
   {
     priest_spell_t::tick( d );
 
+
     if ( d->get_tick_factor() >= 1.0 )
     {
-      if ( priest().talents.discipline.weal_and_woe.enabled() )
+      if ( p().talents.oracle.twinsight.enabled() && d->current_tick <= 3 )
       {
-        priest().buffs.weal_and_woe->trigger();
+        heal->set_target( rng().range( heal->target_list() ) );
+
+        state_t* state       = heal->cast_state( heal->get_state() );
+        state->target        = heal->target;
+        state->snapshot_mult = cast_state( d->state )->snapshot_mult;
+        heal->snapshot_state( state, heal->amount_type( state ) );
+
+        heal->schedule_execute( state );
       }
 
       priest().expand_entropic_rift();
@@ -422,6 +486,12 @@ public:
       state->target        = d->state->target;
       state->snapshot_mult = cast_state( d->state )->snapshot_mult;
       damage->snapshot_state( state, damage->amount_type( state ) );
+      
+      // For some reason its the 2nd bolt? Dont ask me. It says first on the tooltip :)
+      if ( d->current_tick == 2 && p().talents.oracle.prompt_prognosis.enabled() )
+      {
+        state->da_multiplier *= 1.0 + p().talents.oracle.prompt_prognosis->effectN( 1 ).percent();
+      }
 
       damage->schedule_execute( state );
     }
@@ -524,7 +594,7 @@ public:
     }
 
     if ( const spell_data_t* set_bonus = priest().sets->set( PRIEST_DISCIPLINE, MID2, B2 );
-         priest().is_ptr() && priest().sets->has_set_bonus( PRIEST_DISCIPLINE, MID2, B2 ) && set_bonus->ok() )
+         priest().sets->has_set_bonus( PRIEST_DISCIPLINE, MID2, B2 ) && set_bonus->ok() )
     {
       priest().cooldowns.mind_blast->adjust( -set_bonus->effectN( 2 ).time_value() );
     }
@@ -575,7 +645,7 @@ protected:
     {
       double mul = priest_spell_t::composite_atonement_multiplier( s );
 
-      if ( p().talents.voidweaver.void_infusion.enabled() )
+      if ( p().talents.voidweaver.void_infusion.enabled() && p().buffs.entropic_rift->check() )
         mul *= 1 + p().talents.voidweaver.void_infusion->effectN( 2 ).percent();
 
       return mul;
@@ -629,8 +699,7 @@ protected:
 
 public:
   ultimate_penitence_t( priest_t& p, util::string_view options_str )
-    : priest_spell_t( "ultimate_penitence", p, p.talents.discipline.ultimate_penitence ),
-      nested_action( nullptr )
+    : priest_spell_t( "ultimate_penitence", p, p.talents.discipline.ultimate_penitence ), nested_action( nullptr )
   {
     add_option( opt_string( "nested_action", nested_action_name ) );
     parse_options( options_str );
@@ -706,7 +775,8 @@ void priest_t::create_buffs_discipline()
     buffs.borrowed_time->set_default_value( talents.discipline.borrowed_time->effectN( 2 ).percent() );
   }
 
-  buffs.weal_and_woe = make_buff( this, "weal_and_woe", talents.discipline.weal_and_woe_buff );
+  buffs.weal_and_woe =
+      make_buff( this, "weal_and_woe", talents.discipline.weal_and_woe_buff )->set_default_value_from_effect( 1, 0.01 );
 
   buffs.archangel = make_buff( this, "archangel", talents.discipline.archangel_buff );
 
@@ -807,8 +877,8 @@ void priest_t::init_spells_discipline()
 
   // General Spells
   specs.penance         = find_spell( 47540 );
-  specs.penance_channel = find_spell( 47758 );   // Channel spell, triggered by 47540, executes 47666 every tick
-  specs.penance_tick    = find_spell( 47666 );   // Not triggered from 47540, only 47758
+  specs.penance_channel = find_spell( 47758 );  // Channel spell, triggered by 47540, executes 47666 every tick
+  specs.penance_tick    = find_spell( 47666 );  // Not triggered from 47540, only 47758
 
   specs.plea = find_spell( 200829 );
 

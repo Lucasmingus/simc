@@ -1106,6 +1106,7 @@ public:
     proc_t* soul_fragment_from_reapers_toll;
     proc_t* soul_fragment_from_void_metamorphosis;
     proc_t* soul_fragment_from_entropy;
+    proc_t* soul_fragment_auto_pickup;
     std::unordered_map<std::string, proc_t*> shattered_souls;
 
     // Havoc
@@ -1338,7 +1339,7 @@ public:
   void set_out_of_range( timespan_t duration );
   void adjust_movement();
   double calculate_expected_max_health() const;
-  unsigned consume_soul_fragments( soul_fragment = soul_fragment::ANY, bool instant = true,
+  unsigned consume_soul_fragments( soul_fragment = soul_fragment::ANY, bool instant = false,
                                    unsigned max = MAX_SOUL_FRAGMENTS );
   unsigned consume_nearby_soul_fragments( soul_fragment = soul_fragment::ANY );
   unsigned get_active_soul_fragments( soul_fragment = soul_fragment::ANY ) const;
@@ -1421,9 +1422,10 @@ public:
     double meta_drain_multiplier = 1.0;
     // Fit against per-tick drain event schedules from logs (matches cumulative drain
     // timing through end of meta, not just instantaneous rates); see PR #11549.
-    double initial_drain = 15.0;
-    double exp_factor    = 1.40;
-    double exp_power     = 0.0775;
+    double initial_drain          = 15.0;
+    double exp_factor             = 1.40;
+    double exp_power              = 0.0775;
+    double per_event_drain_amount = 2;
 
     fury_state_t( demon_hunter_t* a )
       : start_time( timespan_t::min() ), next_drain_event( nullptr ), drain_stacks( 0 ), actor( a )
@@ -1448,6 +1450,8 @@ public:
       // calculation.
       initial_drain *= meta_drain_multiplier;
       exp_factor *= meta_drain_multiplier;
+
+      per_event_drain_amount = -dh()->spec.void_buildup->effectN( 1 ).resource( RESOURCE_FURY );
     }
 
     void clear_state();
@@ -1707,6 +1711,15 @@ struct soul_fragment_t
 
       frag->activate   = nullptr;
       frag->expiration = make_event<fragment_expiration_t>( sim(), frag );
+
+      // Devourer souls automatically get picked up if they activate inside the pickup range
+      if ( ( frag->dh->specialization() == DEMON_HUNTER_DEVOURER ) && ( frag->get_distance( frag->dh ) <= 4.0 ) )
+      {
+        frag->consume_on_activation = true;
+
+        frag->dh->proc.soul_fragment_auto_pickup->occur();
+      }
+
       frag->dh->activate_soul_fragment( frag );
     }
   };
@@ -1740,7 +1753,8 @@ struct soul_fragment_t
   timespan_t get_travel_time( bool activation = false ) const
   {
     double velocity = dh->spec.consume_soul->missile_speed();
-    if ( ( activation && consume_on_activation ) || velocity == 0 )
+
+    if ( velocity == 0 )
       return timespan_t::zero();
 
     if ( activation )
@@ -1804,12 +1818,15 @@ struct soul_fragment_t
   void set_position()
   {
     // Base position is up to 15 yards to the front right or front left for Vengeance, 9.5 yards for Havoc
+    // 08/12/2026: Devourer base distance appears to be slightly larger than Havoc, needs further testing but
+    // distance=5.6066 results in similar automatic soul pickups to ingame
+
     double distance = 0;
     double dist;
     switch ( dh->specialization() )
     {
       case DEMON_HUNTER_DEVOURER:
-        distance = 4.6066;
+        distance = 5.6066;
         break;
       case DEMON_HUNTER_HAVOC:
         distance = 4.6066;
@@ -2787,10 +2804,10 @@ struct art_of_the_glaive_trigger_t : public BASE
     {
       if ( BASE::dh()->talent.aldrachi_reaver.thrill_of_the_fight->ok() )
       {
-        BASE::dh()->buff.thrill_of_the_fight_haste->trigger();
+        BASE::dh()->buff.thrill_of_the_fight_damage->trigger();
 
         make_event( *BASE::dh()->sim, thrill_delay,
-                    [ this ] { BASE::dh()->buff.thrill_of_the_fight_damage->trigger(); } );
+                    [ this ] { BASE::dh()->buff.thrill_of_the_fight_haste->trigger(); } );
       }
       if ( BASE::dh()->talent.aldrachi_reaver.aldrachi_tactics->ok() )
       {
@@ -3144,7 +3161,7 @@ struct mass_acceleration_trigger_t : public BASE
     switch ( BASE::dh()->specialization() )
     {
       case DEMON_HUNTER_DEVOURER:
-        BASE::dh()->cooldown.reap->reset( true );
+        BASE::dh()->cooldown.reap->reset( false );
         break;
       case DEMON_HUNTER_VENGEANCE:
         BASE::dh()->cooldown.spirit_bomb->reset( true );
@@ -4023,7 +4040,8 @@ struct eye_beam_base_t : public student_of_suffering_trigger_t<final_breath_trig
 
       // 08/01/2026 - Essence Break and Eyebeam currently reduce the value of the other by 2.5 seconds when stacks 2 - 4
       // are each applied.
-      if ( dh()->buff.cycle_of_hatred->check() && dh()->buff.cycle_of_hatred->stack() < 4 )
+      // 2026-08-17 -- EssB is only reduced if the playerh as the 4pc equipped.
+      if ( dh()->set_bonuses.mid2_havoc_4pc->ok() && dh()->buff.cycle_of_hatred->check() && dh()->buff.cycle_of_hatred->stack() < 4 )
       {
         dh()->cooldown.essence_break->adjust(
             -timespan_t::from_millis( as<int>( dh()->buff.cycle_of_hatred->check_value() ) ) );
@@ -4962,8 +4980,16 @@ struct metamorphosis_t : public mass_acceleration_trigger_t<demon_hunter_spell_t
 
         if ( dh()->talent.scarred.violent_transformation->ok() )
         {
-          dh()->cooldown.voidblade->reset( true );
-          dh()->cooldown.predators_wake->reset( true );
+          dh()->cooldown.voidblade->reset( false );
+
+          if ( sim->dbc->wowv() >= wowv_t( 12, 1, 5 ) )
+          {
+            dh()->cooldown.soul_immolation->reset( false );
+          }
+          else
+          {
+            dh()->cooldown.predators_wake->reset( false );
+          }
         }
         break;
       case DEMON_HUNTER_HAVOC:
@@ -5367,6 +5393,7 @@ struct spirit_bomb_t : public demon_hunter_spell_t
     demon_hunter_spell_t::execute();
 
     // Soul fragments consumed are capped for Spirit Bomb
+    // TOCHECK: Do the souls instantly consume?
     const int fragments_consumed = dh()->consume_soul_fragments( soul_fragment::ANY, true, max_fragments_consumed );
     if ( fragments_consumed > 0 )
     {
@@ -5488,6 +5515,7 @@ struct the_hunt_base_t
     {
       dual = true;
       aoe  = as<int>( p->spec.the_hunt->effectN( 2 ).trigger()->effectN( 1 ).base_value() );
+      dot_behavior = DOT_NONE;
     }
   };
 
@@ -5519,7 +5547,8 @@ struct the_hunt_base_t
            dh()->talent.scarred.violent_transformation->ok() )
       {
         // only resets one charge of Soul Immo
-        dh()->cooldown.soul_immolation->reset( true, 1 );
+        if ( sim->dbc->wowv() < wowv_t( 12, 1, 5 ) )
+          dh()->cooldown.soul_immolation->reset( false, 1 );
       }
     }
   };
@@ -5563,6 +5592,8 @@ struct predators_wake_t : public voidsurge_trigger_t<voidsurge_ability::PREDATOR
   predators_wake_t( demon_hunter_t* p, util::string_view o )
     : base_t( "predators_wake", p, p->hero_spec.predators_wake, o )
   {
+    if ( sim->dbc->wowv() >= wowv_t( 12, 1, 5 ) )
+      cooldown = p->cooldown.the_hunt;
   }
 
   bool action_ready() override
@@ -5664,7 +5695,7 @@ struct consume_base_t : public shattered_souls_trigger_t<voidfall_building_trigg
       if ( dh()->set_bonuses.mid2_devourer_4pc->ok() )
       {
         dh()->buff.moment_of_craving->trigger();
-        dh()->cooldown.reap->reset( true );
+        dh()->cooldown.reap->reset( false );
         dh()->spawn_soul_fragment( dh()->proc.soul_fragment_from_soulburst, soul_fragment::LESSER,
                                    as<unsigned int>( dh()->set_bonuses.mid2_devourer_4pc->effectN( 1 ).base_value() ) );
       }
@@ -5815,7 +5846,7 @@ struct consume_t : public consume_base_t
 
 struct voidblade_base_t : public voidrush_trigger_t<hungering_slash_trigger_t<demon_hunter_spell_t>>
 {
-  struct voidblade_damage_t : public burning_blades_trigger_t<shattered_souls_trigger_t<demon_hunter_spell_t>>
+  struct voidblade_damage_t : public burning_blades_trigger_t<demon_hunter_spell_t>
   {
     voidblade_damage_t( util::string_view name, demon_hunter_t* p ) : base_t( name, p, p->spec.voidblade )
     {
@@ -6388,7 +6419,7 @@ struct void_ray_t
       if ( dh()->talent.devourer.moment_of_craving->ok() )
       {
         dh()->buff.moment_of_craving->trigger();
-        dh()->cooldown.reap->reset( true );
+        dh()->cooldown.reap->reset( false );
       }
       if ( voidglare_boon_energize )
       {
@@ -6536,6 +6567,11 @@ struct collapsing_star_t : public demon_hunter_spell_t
     dh()->buff.collapsing_star->expire();
     dh()->buff.collapsing_star_stack->decrement( soul_cost );
     demon_hunter_spell_t::execute();
+ 
+    if ( sim->dbc->wowv() >= wowv_t( 12, 1, 5 ) && dh()->talent.scarred.demonic_intensity->ok() )
+    {
+      dh()->cooldown.the_hunt->reset( false );
+    }
   }
 
   bool action_ready() override
@@ -8186,6 +8222,7 @@ struct soul_cleave_t
     heal->execute_on_target( player );
 
     // Soul fragments consumed are capped for Soul Cleave
+    // TOCHECK: Do the souls instantly consume?
     const int fragments_consumed = dh()->consume_soul_fragments( soul_fragment::ANY, true, max_fragments_consumed );
     damage->set_target( target );
     action_state_t* damage_state = damage->get_state();
@@ -8503,17 +8540,17 @@ struct burning_blades_t : public residual_action::residual_periodic_action_t<dem
 struct vengeful_retreat_t
   : public unbound_chaos_trigger_t<inertia_trigger_trigger_t<exergy_trigger_t<demon_hunter_spell_t>>>
 {
-  struct voidstep_damage_t : public shattered_souls_trigger_t<demon_hunter_spell_t>
+  struct voidstep_damage_t : public demon_hunter_spell_t
   {
     voidstep_damage_t( util::string_view n, demon_hunter_t* p )
-      : base_t( n, p, p->spec.voidstep->effectN( 1 ).trigger() )
+      : demon_hunter_spell_t( n, p, p->spec.voidstep->effectN( 1 ).trigger() )
     {
       aoe = -1;
     }
 
     void execute() override
     {
-      base_t::execute();
+      demon_hunter_spell_t::execute();
 
       dh()->buff.voidstep->expire();
     }
@@ -9881,14 +9918,7 @@ void demon_hunter_t::create_buffs()
   buff.rolling_torment = make_buff( this, "rolling_torment", spec.rolling_torment_buff )->disable_ticking( true );
 
   buff.emptiness = make_buff( this, "emptiness", spec.emptiness_buff )
-                       ->set_pct_buff_type( STAT_PCT_BUFF_HASTE )
                        ->set_constant_behavior( buff_constant_behavior::NEVER_CONSTANT );
-
-  if ( spec.emptiness_buff->ok() )
-  {
-    buff.emptiness->set_default_value( talent.devourer.emptiness->effectN( 1 ).percent() /
-                                       spec.emptiness_buff->max_stacks() );
-  }
 
   buff.impending_apocalypse = make_buff<impending_apocalypse_buff_t>( this );
 
@@ -10565,6 +10595,7 @@ void demon_hunter_t::init_procs()
   proc.soul_fragment_from_reapers_toll       = get_proc( "Soul Fragment from Reaper's Toll" );
   proc.soul_fragment_from_void_metamorphosis = get_proc( "Soul Fragment from Void Metamorphosis" );
   proc.soul_fragment_from_entropy            = get_proc( "Soul Fragment from Entropy" );
+  proc.soul_fragment_auto_pickup             = get_proc( "Soul Fragment Auto Pickup" );
 
   // Havoc
   proc.soul_fragment_from_demonic_appetite = get_proc( "Soul Fragment from Demonic Appetite" );
@@ -11573,6 +11604,12 @@ void demon_hunter_t::init_spells()
     }
   }
 
+  if ( talent.scarred.demonic_intensity->ok() )
+  {
+    // Create a hunt to guarantee the cooldown object exists properly formed.
+    new the_hunt_t( this, "" );
+  }
+
   if ( specialization() == DEMON_HUNTER_DEVOURER )
   {
     devourer_fury_state.init();
@@ -12367,7 +12404,7 @@ unsigned demon_hunter_t::consume_nearby_soul_fragments( soul_fragment type )
   }
 
   event_t::cancel( soul_fragment_pick_up );
-  return demon_hunter_t::consume_soul_fragments( type, true, soul_fragments_to_consume );
+  return demon_hunter_t::consume_soul_fragments( type, false, soul_fragments_to_consume );
 }
 
 // demon_hunter_t::get_active_soul_fragments ================================
@@ -12433,8 +12470,9 @@ double demon_hunter_t::fury_state_t::fury_drain_per_second( int stacks ) const
 
   if ( has_reduced_drain )
   {
-    // Reduced while casting Collapsing Star / channeling Void Ray. Measured ~0.127 from logs.
-    drain *= 0.127;
+    // Reduced while casting Collapsing Star / channeling Void Ray.
+    // 2026-08-16 -- Remeasured on 12.1 to be a factor of 10.
+    drain *= 0.1;
   }
 
   if ( drain_stacks < 1 )
@@ -12451,10 +12489,9 @@ timespan_t demon_hunter_t::fury_state_t::time_to_next_tick( int stacks ) const
   // The drain is a periodic event. A tick schedules the next one at the rate in force when it fires,
   // and a change to the reduced-drain state does not re-time the tick already pending: that tick runs
   // to term at the interval it was scheduled with, and only the tick after it picks up the new rate.
-
-  // 2 as it currently drains 2 per event.
-  // TODO: Don't hardcode this.
-  return 2.0_s / fury_drain_per_second( stacks );
+  // Time between ticks cannot go below 0s and cannot go above 1s.
+  return std::clamp( timespan_t::from_seconds( per_event_drain_amount ) / fury_drain_per_second( stacks ), 0.0_s,
+                     1.0_s );
 }
 
 void demon_hunter_t::fury_state_t::clear_state()
@@ -12500,10 +12537,10 @@ void demon_hunter_t::activate_soul_fragment( soul_fragment_t* frag )
 {
   buff.soul_fragments->trigger();
 
-  // If we spawn a fragment with this flag, instantly consume it
+  // If we spawn a fragment with this flag, consume it once it is active
   if ( frag->consume_on_activation )
   {
-    frag->consume( true );
+    frag->consume();
     return;
   }
 
@@ -12712,6 +12749,7 @@ void demon_hunter_t::parse_player_effects()
   parse_effects( buff.voidfall_building );
   parse_effects( buff.voidfall_spending );
   parse_effects( buff.voidfall_final_hour );
+  parse_effects( buff.emptiness, talent.devourer.emptiness->effectN( 1 ).percent() / 100 );
 
   // Scarred
   parse_effects( buff.pursuit_of_angryness, USE_CURRENT );
@@ -12951,6 +12989,7 @@ public:
         p.proc.soul_fragment_from_reapers_toll,
         p.proc.soul_fragment_from_void_metamorphosis,
         p.proc.soul_fragment_from_entropy,
+        p.proc.soul_fragment_auto_pickup,
 
         // havoc
         p.proc.soul_fragment_from_demonic_appetite,

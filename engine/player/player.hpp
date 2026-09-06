@@ -820,6 +820,13 @@ struct player_t : public actor_t
     double vessel_of_tortured_souls_miss_chance = 0.6;
     // Duration multiplier for Lightspire Core's mastery buff
     double lightspire_core_duration_multiplier = 0.5;
+    // Fraction of Rite of the Hash'ey procs that happen while above the enchant's 80% health
+    // threshold, i.e. how often the proc favors your highest secondary stat instead of a random one.
+    double rite_of_the_hashey_uptime = 0.6;
+    // Permafrost Essence chance to fire the absorb shield. Default 1% chance determined by WCL of keys and raid
+    double permafrost_essence_shield_proc_chance = 0.01;
+    // Use the original health-based (<25%) shield trigger instead of the static proc chance.
+    bool permafrost_essence_use_health_threshold = false;
   } midnight_opts;
 
 private:
@@ -1211,6 +1218,7 @@ public:
   virtual double matching_gear_multiplier( attribute_e /* attr */ ) const;
   /// Player-wide school based multipliers
   virtual double composite_player_multiplier( school_e ) const;
+  virtual double composite_versus_multiplier( player_t* ) const;
   /// Persistent multipliers that are snapshot at the beginning of the spell application/execution
   virtual double composite_persistent_multiplier( school_e ) const { return 1.0; }
   virtual double composite_player_target_multiplier( player_t*, school_e school ) const;

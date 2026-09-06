@@ -369,7 +369,7 @@ struct simplified_player_t : public player_t
   // Options
   struct options_t
   {
-    int item_level      = 281;
+    int item_level      = 323;
     std::string variant = "default";
     double skill         = 1.0;
   } option;
@@ -1311,6 +1311,8 @@ struct evoker_t : public player_t
     bool nerf_em_for_external_sims                             = false;
     bool patchwerk_in_dungeon                                  = false;
     bool force_raid                                            = false;
+    std::string shifting_sands_target_if_str                   = "";
+    bool sands_shuffle_list                                    = true;
   } option;
 
   // Action pointers
@@ -3316,6 +3318,13 @@ struct empowered_release_t : public empowered_base_t<BASE>
         aoe = 1;
     }
 
+    void init() override
+    {
+      option.target_if_str = p()->option.shifting_sands_target_if_str;
+
+      evoker_augment_t::init();
+    }
+
     void execute() override
     {
       target_cache.is_valid = false;
@@ -3337,10 +3346,16 @@ struct empowered_release_t : public empowered_base_t<BASE>
     {
       target_list.clear();
 
+      target_list.push_back( target );
+
       for ( const auto& t : sim->player_no_pet_list )
       {
         if ( t->is_sleeping() )
           continue;
+
+        if ( t == target )
+          continue;
+
         target_list.push_back( t );
       }
 
@@ -3349,12 +3364,15 @@ struct empowered_release_t : public empowered_base_t<BASE>
 
       auto shifting_point = std::partition( target_list.begin(), target_list.end(), [ & ]( player_t* t ) {
         return std::none_of( p()->allied_augmentations.begin(), p()->allied_augmentations.end(),
-                             [ t ]( evoker_t* e ) { return e->get_target_data( t )->buffs.shifting_sands->up(); } );
+                             [ t ]( evoker_t* e ) { return e->get_target_data( t )->buffs.shifting_sands->up(); } ) &&
+               !p()->get_target_data( t )->buffs.shifting_sands->up();
       } );
 
       if ( shifting_point > target_list.begin() )
       {
-        rng().shuffle( target_list.begin(), shifting_point );
+        if ( p()->option.sands_shuffle_list )
+          rng().shuffle( target_list.begin(), shifting_point );
+
         std::partition( target_list.begin(), shifting_point, [ & ]( player_t* t ) {
           return t->primary_role() != ROLE_HYBRID && t->primary_role() != ROLE_HEAL && t->primary_role() != ROLE_TANK &&
                  t != player;
@@ -3363,7 +3381,9 @@ struct empowered_release_t : public empowered_base_t<BASE>
 
       if ( shifting_point < target_list.end() )
       {
-        rng().shuffle( shifting_point, target_list.end() );
+        if ( p()->option.sands_shuffle_list )
+          rng().shuffle( shifting_point, target_list.end() );
+
         std::partition( shifting_point, target_list.end(), [ & ]( player_t* t ) {
           return t->primary_role() != ROLE_HYBRID && t->primary_role() != ROLE_HEAL && t->primary_role() != ROLE_TANK &&
                  t != player;
@@ -3371,6 +3391,21 @@ struct empowered_release_t : public empowered_base_t<BASE>
       }
 
       return target_list.size();
+    }
+
+    bool target_ready( player_t* candidate_target ) override
+    {
+      auto ally_shifting = ( std::any_of(
+          p()->allied_augmentations.begin(), p()->allied_augmentations.end(), [ candidate_target ]( evoker_t* e ) {
+            return e->get_target_data( candidate_target )->buffs.shifting_sands->check();
+          } ) );
+
+      if ( ally_shifting || p()->get_target_data( candidate_target )->buffs.shifting_sands->check() )
+      {
+        return false;
+      }
+
+      return evoker_augment_t::target_ready( candidate_target );
     }
 
     // No point caching using basic cache, cache would be ruined by every cast.
@@ -5227,14 +5262,6 @@ struct fire_breath_t : public empowered_charge_spell_t
 
       if ( p()->talent.infernos_blessing.ok() )
       {
-        if ( p()->bugs )
-        {
-          for ( auto& b : p()->active_infernos_blessings )
-          {
-            b->cancel();
-          }
-        }
-
         if ( p()->buff.ebon_might_self_buff->check() )
         {
           p()->get_target_data( p() )->buffs.infernos_blessing->trigger();
@@ -5401,7 +5428,6 @@ struct shattering_star_t : public evoker_spell_t
 {
   shattering_star_t( evoker_t* p, std::string_view name ) : evoker_spell_t( name, p, p->talent.shattering_star_spell )
   {
-    affected_by_giantkiller = false;
   }
 };
 
@@ -6373,6 +6399,13 @@ struct disintegrate_t : public essence_spell_t
     add_child( eternity_surge );
   }
 
+  void cancel_buff_helpers()
+  {
+    p()->buff.mass_disintegrate_ticks->expire();
+    p()->buff.essence_burst_titanic_wrath_disintegrate->expire();
+    p()->buff.iridescence_red->expire();
+  }
+
   int max_targets() const
   {
     // TODO: Check if the additional target actually increases ST when its missing.
@@ -6393,7 +6426,8 @@ struct disintegrate_t : public essence_spell_t
     {
       dot->cancel();
     }
-
+    
+    cancel_buff_helpers();
     current_dots.clear();
 
     essence_spell_t::cancel();
@@ -6407,6 +6441,8 @@ struct disintegrate_t : public essence_spell_t
     {
       dot->cancel();
     }
+    
+    cancel_buff_helpers();
   }
 
   void reset() override
@@ -6543,7 +6579,9 @@ struct disintegrate_t : public essence_spell_t
 
     p()->trigger_aura_applied_callbacks( proc_data, p() );
 
-    if ( current_dots[ 0 ] == d )
+    bool is_main_tick = current_dots[ 0 ] == d && ( p()->buff.mass_disintegrate_ticks->check() > 1 || current_dots.size() == 1 );
+
+    if ( is_main_tick )
     {
       p()->buff.mass_disintegrate_ticks->decrement();
     }
@@ -6580,7 +6618,7 @@ struct disintegrate_t : public essence_spell_t
                                               p()->talent.flameshaper.inner_flame_buff->effectN( 2 ).percent() ) );
     }
 
-    if ( p()->talent.causality.ok() && current_dots[ 0 ] == d )
+    if ( p()->talent.causality.ok() && is_main_tick )
     {
       auto cdr = p()->talent.causality->effectN( 1 ).time_value();
       p()->cooldown.eternity_surge->adjust( cdr );
@@ -7093,7 +7131,7 @@ struct pyre_t : public essence_spell_t
     timespan_t consume_flame_duration;
     pyre_damage_t( evoker_t* p, std::string_view name_str )
       : essence_spell_t( name_str, p, p->find_spell( 357212 ) ),
-        consume_flame_mul( p->talent.flameshaper.consume_flame->effectN( 4 ).percent() ),
+        consume_flame_mul( p->talent.flameshaper.consume_flame->effectN( 7 ).percent() ),
         consume_flame_duration( p->talent.flameshaper.consume_flame->effectN( 3 ).time_value() )
     {
       dual = true;
@@ -8101,7 +8139,7 @@ public:
   bool force_external;
   bombardments_damage_t( player_t* p )
     : base( "bombardments", p, p->find_spell( 434481 ) ),
-      diverted_power_chance( 0.085 ),  // Reasonable guess. TODO: Get more accurate
+      diverted_power_chance( 0.1 ),  // Reasonable guess. TODO: Get more accurate
       cooldown_objects{ false },
       force_external( false )
   {
@@ -9180,10 +9218,10 @@ void evoker_t::init_action_list()
       evoker_apl::preservation( this );
       break;
     case EVOKER_AUGMENTATION:
-      if ( sim->dbc->wowv() >= wowv_t( 12, 0, 5 ) )
-        evoker_apl::augmentation_12_0_5( this );
+      if ( sim->dbc->wowv() >= wowv_t( 12, 1, 0 ) )
+        evoker_apl::augmentation_12_1_0( this );
       else
-        evoker_apl::augmentation_12_0_0( this );
+        evoker_apl::augmentation_12_0_5( this );
       break;
     default:
       evoker_apl::no_spec( this );
@@ -10225,6 +10263,8 @@ void evoker_t::init_spells()
 
   register_passive_affect_list( talent.natural_convergence, affect_list_t( 3 ).remove_spell( 1259172 ) );
 
+  register_passive_affect_list( talent.spellweavers_dominance, affect_list_t( 1 ).add_spell( 444089, 445495 ) );
+
   // Register passives
   parse_all_class_passives();
   parse_all_passive_talents();
@@ -10745,6 +10785,8 @@ void evoker_t::create_options()
   add_option( opt_bool( "evoker.patchwerk_in_dungeon", option.patchwerk_in_dungeon ) );
   add_option( opt_bool( "evoker.nerf_em_for_external_sims", option.nerf_em_for_external_sims ) );
   add_option( opt_bool( "evoker.force_raid", option.force_raid ) );
+  add_option( opt_string( "evoker.shifting_sands_target_if_str", option.shifting_sands_target_if_str ) );
+  add_option( opt_bool( "evoker.sands_shuffle_list", option.sands_shuffle_list ) );
 }
 
 void evoker_t::analyze( sim_t& sim )
@@ -11233,10 +11275,6 @@ void evoker_t::spawn_mote_of_possibility( player_t* prospective_player, mote_buf
 
   if ( mote_buff == mote_buffs_e::INFERNOS_BLESSING )
   {
-    // Maintain two IBs
-    if ( active_infernos_blessings.size() > 0 )
-      rng().range( active_infernos_blessings )->cancel();
-
     get_target_data( target )->buffs.infernos_blessing->trigger();
   }
   else if ( mote_buff == mote_buffs_e::PRESCIENCE )

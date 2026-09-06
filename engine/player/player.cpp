@@ -470,7 +470,8 @@ struct leech_t : public heal_t
   {
     heal_t::init();
 
-    snapshot_flags = update_flags = STATE_MUL_DA | STATE_TGT_MUL_DA | STATE_VERSATILITY | STATE_MUL_PERSISTENT;
+    snapshot_flags = update_flags =
+      STATE_MUL_SPELL_DA | STATE_MUL_PLAYER_DAM | STATE_TGT_MUL_DA | STATE_VERSATILITY | STATE_MUL_PERSISTENT;
 
     player->register_combat_begin( []( player_t* p ) {
       make_repeating_event( *p->sim,
@@ -2638,7 +2639,7 @@ static std::string generate_traits_hash( player_t* player )
       {
         rank = _entry_rank;
         max_rank = _entry_trait->max_ranks;
-        init_rank = trait_data_t::is_granted( _entry_trait, player->type, player->specialization(), ptr ) ? 1U : 0U;
+        init_rank = trait_data_t::is_granted( _entry_trait, player->specialization() ) ? 1U : 0U;
         index = as<unsigned>( i );
         break;
       }
@@ -3085,7 +3086,7 @@ static void parse_traits( talent_tree tree, const std::string& opt_str, player_t
   // add any freely granted traits
   for ( const auto& trait : trait_data_t::data( util::class_id( player->type ), tree, player->is_ptr() ) )
   {
-    if ( trait_data_t::is_granted( &trait, player->type, player->specialization(), player->is_ptr() ) )
+    if ( trait_data_t::is_granted( &trait, player->specialization() ) )
     {
       auto id = trait.id_trait_node_entry;
       auto it = range::find_if( player->player_traits, [ id ]( const auto& e ) { return std::get<1>( e ) == id; } );
@@ -5563,7 +5564,7 @@ double player_t::composite_player_multiplier( school_e school ) const
   return m;
 }
 
-double player_t::composite_player_target_multiplier( player_t* t, school_e /* school */ ) const
+double player_t::composite_versus_multiplier( player_t* t ) const
 {
   double m = 1.0;
 
@@ -5579,6 +5580,13 @@ double player_t::composite_player_target_multiplier( player_t* t, school_e /* sc
       m *= 1.0 + std::get<2>( entry );
     }
   }
+
+  return m;
+}
+
+double player_t::composite_player_target_multiplier( player_t* t, school_e /* school */ ) const
+{
+  double m = 1.0;
 
   auto td = find_target_data( t );
   if ( td )
@@ -5899,7 +5907,8 @@ double player_t::composite_mitigation_multiplier( const action_state_t* s, schoo
 {
   double m = 1.0;
 
-  if ( !is_enemy() && type != HEALING_ENEMY )
+  if ( !is_enemy() && type != HEALING_ENEMY &&
+       ( s->result_type == result_amount_type::DMG_DIRECT || s->result_type == result_amount_type::DMG_OVER_TIME ) )
   {
     if ( !is_pet() )
     {
@@ -7408,7 +7417,7 @@ void player_t::regen( timespan_t periodicity )
 
   for ( resource_e r = RESOURCE_HEALTH; r < RESOURCE_MAX; r++ )
   {
-    if ( resources.is_active( r ) )
+    if ( resources.active_resource[ r ] )
     {
       double regen  = resource_regen_per_second( r );
       gain_t* gain = gains.resource_regen[ r ];
@@ -9974,7 +9983,7 @@ struct use_item_t : public action_t
 
       // if the action is the same as the driver, has a direct/periodic damage effect, and the driver has a cast time,
       // then the action is not considered a proc
-      if ( action && action->id == e->driver()->id() && e->driver()->cast_time() > 0_ms &&
+      if ( action && action->id == e->spell_id && e->driver()->cast_time() > 0_ms &&
            ( action_t::has_direct_damage_effect( *e->driver() ) ||
              action_t::has_periodic_damage_effect( *e->driver() ) ) )
       {
@@ -13658,7 +13667,13 @@ void player_t::create_options()
   add_option( opt_timespan( "midnight.arcanoweave_trappings_update_interval_stddev",
                             midnight_opts.arcanoweave_trappings_update_interval_stddev, 1_s, timespan_t::max() ) );
   add_option(    opt_float( "midnight.lightspire_core_duration_multiplier",
-                            midnight_opts.lightspire_core_duration_multiplier, 0.0, 1.0 ) );
+                            midnight_opts.lightspire_core_duration_multiplier, 0.1, 1.0 ) );
+  add_option(    opt_float( "midnight.rite_of_the_hashey_uptime",
+                            midnight_opts.rite_of_the_hashey_uptime, 0.0, 1.0 ) );
+  add_option(    opt_float( "midnight.permafrost_essence_shield_proc_chance",
+                            midnight_opts.permafrost_essence_shield_proc_chance, 0.0, 1.0 ) );
+  add_option(     opt_bool( "midnight.permafrost_essence_use_health_threshold",
+                            midnight_opts.permafrost_essence_use_health_threshold ) );
 }
 
 player_t* player_t::create( sim_t*, const player_description_t& )
@@ -13868,6 +13883,13 @@ scaling_metric_data_t player_t::scaling_for_metric( scale_metric_e metric ) cons
       double mean   = q->collected_data.hps.mean() + q->collected_data.aps.mean();
       double stddev = sqrt( q->collected_data.hps.mean_variance + q->collected_data.aps.mean_variance );
       return { metric, "Healing + Absorb per second", mean, stddev };
+    }
+    case SCALE_METRIC_DHAPS:
+    {
+      double hps_value = q->sim->dhaps_healing_weight;
+      double mean   = ( q->collected_data.hps.mean() + q->collected_data.aps.mean() ) * hps_value + q->collected_data.dps.mean();
+      double stddev = sqrt( ( q->collected_data.hps.mean_variance + q->collected_data.aps.mean_variance ) * hps_value + q->collected_data.dps.mean_variance );
+      return { metric, "Damage + Healing + Absorb per second (haps weight: " + std::to_string( hps_value ) + ")", mean, stddev };
     }
     case SCALE_METRIC_DTPS:
       return { metric, q->collected_data.dtps };

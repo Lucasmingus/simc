@@ -332,6 +332,7 @@ public:
     cooldown_t* ret_aura_icd;
     cooldown_t* consecrated_blade_icd;
     cooldown_t* righteous_cause_icd;
+    cooldown_t* divine_resonance_icd;
 
     cooldown_t* aurora_icd;
     cooldown_t* second_sunrise_icd;
@@ -779,7 +780,8 @@ public:
   player_t* random_bulwark_target;
   int divine_inspiration_next;
 
-  double reflection_of_radiance_proc_chance;
+  double reflection_of_radiance_proc_chance_sacred_weapon;
+  double reflection_of_radiance_proc_chance_holy_bulwark;
 
   paladin_t( sim_t* sim, util::string_view name, race_e r = RACE_TAUREN );
 
@@ -991,7 +993,7 @@ struct holy_bulwark_absorb_t : public absorb_buff_t
   void absorb_used( double absorbed, player_t* source ) override
   {
     absorb_buff_t::absorb_used( absorbed, source );
-    double chance = caster->reflection_of_radiance_proc_chance;
+    double chance = caster->reflection_of_radiance_proc_chance_holy_bulwark;
     double stacks = caster->buffs.lightsmith.fake_solidarity_bulwark->stack();
     // Holy Bulwarks on the group don't trigger all that often, so it shouldn't be a 100% increased chance
     double increasedChance = stacks * caster->options.ror_bulwark_additional_proc_chance;  
@@ -1605,13 +1607,10 @@ public:
     if ( triggers_crusade_stacks && p->talents.crusade->ok() && p->buffs.avenging_wrath->up() )
     {
       int crusade_stacks = as<int>( num_hopo_spent );
-      // Hammer of Light always gives 5 Stacks, even if it's free
-      if ( is_hammer_of_light_main )
+      // 2026-08-22 Hammer of Light always gives 9 Stacks. Because
+      if ( is_hammer_of_light_main && p->bugs)
       {
-        crusade_stacks = as<int>( hol_cost );
-        // 2025-12-24 Fluttershy: Currently, if HoL is cast with less then 5 stacks, you gain 10 Crusade Stacks
-        if ( p->bugs && p->buffs.avenging_wrath->stack() < 5 )
-          crusade_stacks *= 2;
+        crusade_stacks = 9;
       }
       if ( crusade_stacks > 0 )
         p->buffs.avenging_wrath->trigger( as<int>( crusade_stacks ) );
