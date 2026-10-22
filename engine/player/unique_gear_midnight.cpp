@@ -5980,21 +5980,6 @@ namespace omnium
 // Item level used for omnium coeff scaling spell 1288183
 static constexpr unsigned OMNIUM_ITEM_LEVEL = 289;
 
-// Rune of Critical Mass: 1324904 driver
-struct critical_mass_spell_t
-{
-  unsigned core_id;
-  unsigned spell_id;
-  bool orbs;
-};
-
-static constexpr std::array<critical_mass_spell_t, 4> critical_mass_spells = { {
-    { 1286970, 1325140, false },  // Rune of Unleashed Fire damage
-    { 1263002, 1325540, false },  // Rune of Unleashed Fire heal
-    { 1286716, 1325431, true },   // Rune of Void-Touched Orbs damage
-    { 1286721, 1325432, true },   // Rune of Void-Touched Orbs heal
-} };
-
 struct rune_of_echoes_debuff_t : public buff_t
 {
   double accumulator;
@@ -6076,9 +6061,6 @@ struct omnium_core_rune_t : public BASE
   bool has_echoes;
   double echo_coeff;
   action_t* echo;
-  action_t* critical_mass;
-  real_ppm_t* critical_mass_rppm;
-  unsigned critical_mass_orbs;
 
   omnium_core_rune_t( const special_effect_t& e, std::string_view n, unsigned id )
     : BASE( e, n, id ),
@@ -6087,10 +6069,7 @@ struct omnium_core_rune_t : public BASE
       stat_coeff( std::floor( coeff->effectN( 3 ).average_no_item( BASE::player, OMNIUM_ITEM_LEVEL ) ) * 0.01 ),
       has_echoes( false ),
       echo_coeff( 0 ),
-      echo( nullptr ),
-      critical_mass( nullptr ),
-      critical_mass_rppm( nullptr ),
-      critical_mass_orbs( 1 )
+      echo( nullptr )
   {
     constexpr bool heal = std::is_base_of_v<heal_t, BASE>;
 
@@ -6135,40 +6114,6 @@ struct omnium_core_rune_t : public BASE
     // Rune of Overload: 1279614 driver
     if ( auto overload = find_special_effect( e.player, 1279614 ) )
       BASE::base_multiplier *= 1.0 + overload->driver()->effectN( 1 ).percent();
-
-    // Rune of Critical Mass: 1324904 driver
-    if ( auto critical = find_special_effect( e.player, 1324904 ) )
-    {
-      if ( !heal )
-      {
-        e.player->sim->error(
-            UNVERIFIED_IMPLEMENTATION,
-            "Rune of Critical Mass: RPPM is assumed to be rolled on every core rune hit or heal, "
-            "rather than on every player ability." );
-      }
-
-      for ( const auto& cm : critical_mass_spells )
-      {
-        if ( cm.core_id != id )
-          continue;
-
-        if ( cm.orbs )
-          critical_mass_orbs =
-              as<unsigned>( std::max( 1, e.player->find_spell( 1325431 )->effectN( 1 ).misc_value1() ) );
-
-        critical_mass              = create_proc_action<BASE>( fmt::format( "{}_critical_mass", n ), e, cm.spell_id );
-        critical_mass->base_dd_min = critical_mass->base_dd_max =
-            dmg_coeff * critical_mass->data().effectN( 2 ).base_value() / critical_mass_orbs;
-        critical_mass->split_aoe_damage   = true;
-        critical_mass->name_str_reporting = "rune_of_critical_mass";
-
-        if ( !critical_mass->stats->parent )
-          BASE::add_child( critical_mass );
-
-        critical_mass_rppm = e.player->get_rppm( "rune_of_critical_mass", critical->driver() );
-        break;
-      }
-    }
   }
 
   buff_t* create_debuff( player_t* t ) override
@@ -6187,12 +6132,6 @@ struct omnium_core_rune_t : public BASE
   void impact( action_state_t* s ) override
   {
     BASE::impact( s );
-
-    if ( critical_mass && critical_mass_rppm->trigger() )
-    {
-      for ( unsigned i = 0; i < critical_mass_orbs; i++ )
-        critical_mass->execute_on_target( s->target );
-    }
 
     if ( !has_echoes )
       return;
@@ -6236,6 +6175,68 @@ stat_buff_t* create_omnium_stat_buff( const special_effect_t& effect )
   return nullptr;
 }
 
+// Rune of Critical Mass
+// 1324904 Driver
+// 1325478 Hidden aura (e1: 50, unknown)
+// 1325140 Fire damage
+// 1325540 Fire heal
+// 1325431 Void damage
+//  e1: orb count
+// 1325432 Void heal
+// TODO: proc model. In logs 0 of 6 activations within 4.4s of the previous proc procced, 11 of 12 after 5.4s or more
+// did. Also fits a high chance with a ~5s lockout instead of the driver rppm.
+// TODO: target scaling, only single target logged
+// TODO: heals are untested, assumed to scale like the damage
+// TODO: does Rune of Overload apply
+std::function<void( player_t* )> create_critical_mass( const special_effect_t& effect, unsigned damage_id,
+                                                      unsigned heal_id, bool orbs )
+{
+  auto critical = find_special_effect( effect.player, 1324904 );
+  if ( !critical )
+    return nullptr;
+
+  effect.player->sim->error( UNVERIFIED_IMPLEMENTATION,
+                             "Rune of Critical Mass: Procs are assumed to roll the driver RPPM once per Core Rune "
+                             "activation. Damage split and healing are untested." );
+
+  const spelleffect_data_t& coeff_effect = effect.driver()->effectN( 2 ).trigger()->effectN( 1 );
+  const double base_points = std::floor( coeff_effect.average_no_item( effect.player, OMNIUM_ITEM_LEVEL ) ) * 0.01;
+  const unsigned count =
+      as<unsigned>( std::max( 1, effect.player->find_spell( 1325431 )->effectN( 1 ).misc_value1() ) );
+
+  // BUG: the tooltip shows bp * s2 for fire and bp * s2 / count per orb for void, but in game both deal
+  // count * bp * s2 per proc, fire as one hit and void as count orbs of bp * s2 each
+  const unsigned hits = orbs ? count : 1;
+  const double mult   = orbs ? 1.0 : count;
+
+  auto damage = create_proc_action<generic_aoe_proc_t>( "rune_of_critical_mass", effect, damage_id, false );
+  damage->base_dd_min = damage->base_dd_max = base_points * damage->data().effectN( 2 ).base_value() * mult;
+
+  auto heal = create_proc_action<generic_heal_t>( "rune_of_critical_mass_heal", effect, heal_id );
+  heal->base_dd_min = heal->base_dd_max = base_points * heal->data().effectN( 2 ).base_value() * mult;
+  heal->name_str_reporting = "Heal";
+
+  auto rppm = effect.player->get_rppm( "rune_of_critical_mass", critical->driver() );
+
+  // not in spell data, taken from logs
+  const timespan_t delay   = orbs ? 1.5_s : 3_s;
+  const timespan_t spacing = 1.75_s;
+
+  return [ damage, heal, rppm, hits, delay, spacing ]( player_t* t ) {
+    if ( !rppm->trigger() )
+      return;
+
+    auto action = t->is_enemy() ? damage : heal;
+    for ( unsigned i = 0; i < hits; i++ )
+    {
+      make_event( *action->sim, delay + i * spacing, [ action, t ] {
+        if ( !t->is_sleeping() )
+          action->execute_on_target( t );
+      } );
+    }
+  };
+}
+
 // 1279599 driver
 // 1286970 damage
 // 1263002 heal
@@ -6249,18 +6250,23 @@ void rune_of_unleashed_fire( special_effect_t& effect )
   auto damage = create_proc_action<omnium_core_rune_t<generic_proc_t>>( "rune_of_unleashed_fire", effect, 1286970 );
   auto heal = create_proc_action<omnium_core_rune_t<generic_heal_t>>( "rune_of_unleashed_fire_heal", effect, 1263002 );
   auto buff = create_omnium_stat_buff( effect );
-  auto callback = [ damage, heal, buff ]( auto, auto, player_t* t, auto ) {
+  auto critical_mass = create_critical_mass( effect, 1325140, 1325540, false );
+  auto callback = [ damage, heal, buff, critical_mass ]( auto, auto, player_t* t, auto ) {
     if ( buff )
       buff->trigger();
 
-    if ( t->is_enemy() )
-      damage->execute_on_target( t );
     // Does not trigger the heal on the players pets. Instead execute damage on the first non-sleeping target in the
     // players target list. Might be worth exploring if we can get the players last target to trigger this on instead.
-    else if ( t->is_pet() && !t->sim->target_non_sleeping_list.empty() )
-      damage->execute_on_target( t->sim->target_non_sleeping_list[ 0 ] );
+    if ( t->is_pet() && !t->sim->target_non_sleeping_list.empty() )
+      t = t->sim->target_non_sleeping_list[ 0 ];
+
+    if ( t->is_enemy() )
+      damage->execute_on_target( t );
     else
       heal->execute_on_target( t );
+
+    if ( critical_mass )
+      critical_mass( t );
   };
 
   effect.player->callbacks.register_callback_execute_function( effect.spell_id, callback );
@@ -6293,6 +6299,7 @@ void rune_of_voidtouched_orbs( special_effect_t& effect )
       create_proc_action<omnium_core_rune_t<generic_heal_t>>( "rune_of_voidtouched_orbs_heal", effect, 1286721 );
 
   auto buff = create_omnium_stat_buff( effect );
+  auto critical_mass = create_critical_mass( effect, 1325431, 1325432, true );
 
   // create orb buff & periodic trigger
   auto orb_buff = create_buff( effect.player, effect.trigger() );
@@ -6320,12 +6327,15 @@ void rune_of_voidtouched_orbs( special_effect_t& effect )
       } );
 
   effect.player->callbacks.register_callback_execute_function(
-      orb->spell_id, [ orb_buff, damage, heal, buff ]( auto, auto, player_t* t, auto ) {
+      orb->spell_id, [ orb_buff, damage, heal, buff, critical_mass ]( auto, auto, player_t* t, auto ) {
         auto stacks = orb_buff->check();
         orb_buff->expire();
 
         if ( buff )
           buff->trigger();
+
+        if ( critical_mass )
+          critical_mass( t );
 
         while ( stacks-- )
         {
