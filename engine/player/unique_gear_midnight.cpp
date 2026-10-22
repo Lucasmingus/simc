@@ -6176,18 +6176,17 @@ stat_buff_t* create_omnium_stat_buff( const special_effect_t& effect )
 }
 
 // Rune of Critical Mass
-// 1324904 Driver
-// 1325478 Hidden aura (e1: 50, unknown)
+// 1324904 Driver, rppm procs apply 1325478
+// 1325478 Hidden aura, consumed by the next core rune activation (e1: 50, unknown)
 // 1325140 Fire damage
 // 1325540 Fire heal
 // 1325431 Void damage
 //  e1: orb count
 // 1325432 Void heal
-// TODO: proc model. In logs 0 of 6 activations within 4.4s of the previous proc procced, 11 of 12 after 5.4s or more
-// did. Also fits a high chance with a ~5s lockout instead of the driver rppm.
-// TODO: target scaling, only single target logged
+// Not affected by Rune of Overload
 // TODO: heals are untested, assumed to scale like the damage
-// TODO: does Rune of Overload apply
+// TODO: aoe scaling cap, only measured up to 4 targets
+// TODO: in logs an armed activation on the same target released a pending fire blast early, not modelled
 std::function<void( player_t* )> create_critical_mass( const special_effect_t& effect, unsigned damage_id,
                                                       unsigned heal_id, bool orbs )
 {
@@ -6195,9 +6194,17 @@ std::function<void( player_t* )> create_critical_mass( const special_effect_t& e
   if ( !critical )
     return nullptr;
 
-  effect.player->sim->error( UNVERIFIED_IMPLEMENTATION,
-                             "Rune of Critical Mass: Procs are assumed to roll the driver RPPM once per Core Rune "
-                             "activation. Damage split and healing are untested." );
+  effect.player->sim->error( UNVERIFIED_IMPLEMENTATION, "Rune of Critical Mass: Healing is untested." );
+
+  auto armed = create_buff( effect.player, effect.player->find_spell( 1325478 ) );
+
+  auto driver          = new special_effect_t( effect.player );
+  driver->name_str     = "rune_of_critical_mass";
+  driver->spell_id     = critical->spell_id;
+  driver->proc_flags2_ = PF2_ALL_HIT;
+  driver->custom_buff  = armed;
+  effect.player->special_effects.push_back( driver );
+  new dbc_proc_callback_t( effect.player, *driver );
 
   const spelleffect_data_t& coeff_effect = effect.driver()->effectN( 2 ).trigger()->effectN( 1 );
   const double base_points = std::floor( coeff_effect.average_no_item( effect.player, OMNIUM_ITEM_LEVEL ) ) * 0.01;
@@ -6209,29 +6216,34 @@ std::function<void( player_t* )> create_critical_mass( const special_effect_t& e
   const unsigned hits = orbs ? count : 1;
   const double mult   = orbs ? 1.0 : count;
 
-  auto damage = create_proc_action<generic_aoe_proc_t>( "rune_of_critical_mass", effect, damage_id, false );
+  auto damage = create_proc_action<generic_aoe_proc_t>( "rune_of_critical_mass", effect, damage_id );
   damage->base_dd_min = damage->base_dd_max = base_points * damage->data().effectN( 2 ).base_value() * mult;
 
   auto heal = create_proc_action<generic_heal_t>( "rune_of_critical_mass_heal", effect, heal_id );
   heal->base_dd_min = heal->base_dd_max = base_points * heal->data().effectN( 2 ).base_value() * mult;
   heal->name_str_reporting = "Heal";
 
-  auto rppm = effect.player->get_rppm( "rune_of_critical_mass", critical->driver() );
-
   // not in spell data, taken from logs
-  const timespan_t delay   = orbs ? 1.5_s : 3_s;
-  const timespan_t spacing = 1.75_s;
+  const timespan_t delay   = orbs ? 1.7_s : 3_s;
+  const timespan_t spacing = 1.7_s;
 
-  return [ damage, heal, rppm, hits, delay, spacing ]( player_t* t ) {
-    if ( !rppm->trigger() )
+  return [ damage, heal, armed, hits, delay, spacing ]( player_t* t ) {
+    if ( !armed->check() )
       return;
+
+    armed->expire();
 
     auto action = t->is_enemy() ? damage : heal;
     for ( unsigned i = 0; i < hits; i++ )
     {
       make_event( *action->sim, delay + i * spacing, [ action, t ] {
-        if ( !t->is_sleeping() )
-          action->execute_on_target( t );
+        auto target = t;
+        // still lands if the target died
+        if ( target->is_sleeping() && target->is_enemy() && !target->sim->target_non_sleeping_list.empty() )
+          target = target->sim->target_non_sleeping_list[ 0 ];
+
+        if ( !target->is_sleeping() )
+          action->execute_on_target( target );
       } );
     }
   };
